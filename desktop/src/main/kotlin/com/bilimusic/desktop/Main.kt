@@ -70,6 +70,8 @@ fun main() = application {
     var windowVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val trayState = rememberTrayState()
+    // 与安卓端同一个 BM 图标（打包在 resources/icons 里）
+    val appIcon = rememberAppIcon()
 
     // 应用级依赖建在 application 作用域，托盘菜单才能直接控制播放
     val app = rememberDesktopApp(scope)
@@ -79,6 +81,7 @@ fun main() = application {
         onCloseRequest = { windowVisible = false },
         state = windowState,
         title = "bilimusic",
+        icon = appIcon,
         visible = windowVisible,
         onKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown) {
@@ -104,7 +107,7 @@ fun main() = application {
     }
 
     Tray(
-        icon = rememberBilimusicTrayIcon(),
+        icon = appIcon,
         state = trayState,
         tooltip = "bilimusic",
         onAction = { windowVisible = true },
@@ -183,38 +186,40 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
     )
 }
 
-/** 托盘图标：用 Skia 画一个圆角方块 + 音符，不依赖额外资源文件 */
+/** 应用图标：直接用安卓端那套 BM 图标（打包在资源和 jar 里） */
 @Composable
-private fun rememberBilimusicTrayIcon(): Painter = remember {
-    val size = 64
-    val pixels = IntArray(size * size)
-    for (y in 0 until size) {
-        for (x in 0 until size) {
-            val inCircle = (x - 32) * (x - 32) + (y - 32) * (y - 32) <= 30 * 30
-            pixels[y * size + x] = if (inCircle) 0xFF6750A4.toInt() else 0x00000000
+private fun rememberAppIcon(): Painter = remember {
+    val bytes = object {}.javaClass.getResourceAsStream("/icons/ic_launcher.png")?.use { it.readBytes() }
+    if (bytes != null) {
+        BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
+    } else {
+        // 兜底：万一资源缺失，画一个纯色圆，保证不崩
+        val size = 64
+        val bytes2 = ByteArray(size * size * 4)
+        for (y in 0 until size) {
+            for (x in 0 until size) {
+                val inside = (x - 32) * (x - 32) + (y - 32) * (y - 32) <= 30 * 30
+                val o = (y * size + x) * 4
+                if (inside) {
+                    bytes2[o] = 0xA4.toByte(); bytes2[o + 1] = 0x50.toByte()
+                    bytes2[o + 2] = 0x67.toByte(); bytes2[o + 3] = 0xFF.toByte()
+                }
+            }
         }
+        val bmp = org.jetbrains.skia.Bitmap().apply {
+            allocN32Pixels(size, size, false)
+            installPixels(
+                org.jetbrains.skia.ImageInfo.makeN32(
+                    size,
+                    size,
+                    org.jetbrains.skia.ColorAlphaType.PREMUL,
+                ),
+                bytes2,
+                size * 4,
+            )
+        }
+        BitmapPainter(org.jetbrains.skia.Image.makeFromBitmap(bmp).toComposeImageBitmap())
     }
-    val bytes = ByteArray(size * size * 4)
-    pixels.forEachIndexed { i, argb ->
-        val o = i * 4
-        bytes[o] = (argb and 0xFF).toByte()
-        bytes[o + 1] = ((argb shr 8) and 0xFF).toByte()
-        bytes[o + 2] = ((argb shr 16) and 0xFF).toByte()
-        bytes[o + 3] = ((argb shr 24) and 0xFF).toByte()
-    }
-    val bitmap = org.jetbrains.skia.Bitmap().apply {
-        allocN32Pixels(size, size, false)
-        installPixels(
-            org.jetbrains.skia.ImageInfo.makeN32(
-                size,
-                size,
-                org.jetbrains.skia.ColorAlphaType.PREMUL,
-            ),
-            bytes,
-            size * 4,
-        )
-    }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromBitmap(bitmap).toComposeImageBitmap())
 }
 
 /** 应用级依赖（只建一次） */
