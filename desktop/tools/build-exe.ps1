@@ -29,6 +29,8 @@ if (-not (Test-Path $sevenZip) -or -not (Test-Path $sfxModule)) {
 }
 
 Write-Host '[1/5] Portable payload'
+# delete any previous payload first - never ship a stale jar
+Remove-Item (Join-Path $repoRoot 'desktop\build\portable') -Recurse -Force -ErrorAction SilentlyContinue
 if (Test-Path (Join-Path $portable 'lib')) {
     Write-Host '  reusing desktop\build\portable\bilimusic'
 } else {
