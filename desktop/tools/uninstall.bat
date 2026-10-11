@@ -1,53 +1,53 @@
 @echo off
-chcp 65001 >nul
-title bilimusic 卸载程序
+chcp 936 >nul
+title bilimusic ж�س���
 setlocal enabledelayedexpansion
 
 echo.
 echo   ================================================
-echo      bilimusic 桌面版 · 卸载
+echo      bilimusic ����� �� ж��
 echo   ================================================
 echo.
 
-rem 默认安装位置；如果你安装时选了别处，可以直接把这个 bat 放进那个目录再运行
+rem Ĭ�ϰ�װλ�ã�����㰲װʱѡ�˱𴦣�����ֱ�Ӱ���� bat �Ž��Ǹ�Ŀ¼������
 set "TARGET=%LOCALAPPDATA%\Programs\bilimusic"
 if not exist "%TARGET%\bilimusic.bat" (
     if exist "%~dp0bilimusic.bat" (
         set "TARGET=%~dp0"
     ) else (
-        echo   没在默认位置找到 bilimusic：
+        echo   û��Ĭ��λ���ҵ� bilimusic��
         echo     %LOCALAPPDATA%\Programs\bilimusic
         echo.
-        set /p "TARGET=   请粘贴你的安装目录（含 bilimusic.bat）后回车："
+        set /p "TARGET=   ��ճ����İ�װĿ¼���� bilimusic.bat����س���"
     )
 )
 set "TARGET=%TARGET:"=%"
 if not exist "%TARGET%\bilimusic.bat" (
-    echo   这个目录里没有 bilimusic，已取消。
+    echo   ���Ŀ¼��û�� bilimusic����ȡ����
     pause
     exit /b 1
 )
 
-echo   安装目录：%TARGET%
+echo   ��װĿ¼��%TARGET%
 echo.
-choice /c YN /n /m "   是否同时删除歌单与登录信息（%USERPROFILE%\.bilimusic）? [Y/N] "
+choice /c YN /n /m "   �Ƿ�ͬʱɾ���赥���¼��Ϣ��%USERPROFILE%\.bilimusic��? [Y/N] "
 if errorlevel 2 goto keepdata
 rmdir /s /q "%USERPROFILE%\.bilimusic"
-echo   · 已删除歌单与登录信息
+echo   �� ��ɾ���赥���¼��Ϣ
 goto afterdata
 :keepdata
-echo   · 已保留 %USERPROFILE%\.bilimusic（歌单与登录信息）
+echo   �� �ѱ��� %USERPROFILE%\.bilimusic���赥���¼��Ϣ��
 :afterdata
 
-rem 桌面与开始菜单快捷方式（桌面可能在别处，用 PowerShell 取真实路径）
+rem �����뿪ʼ�˵���ݷ�ʽ����������ڱ𴦣��� PowerShell ȡ��ʵ·����
 powershell -NoProfile -Command "Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) 'bilimusic.lnk') -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'bilimusic.lnk') -Force -ErrorAction SilentlyContinue"
-echo   · 已删除桌面与开始菜单快捷方式
+echo   �� ��ɾ�������뿪ʼ�˵���ݷ�ʽ
 
-rem 如果安装时注册过卸载信息（新版安装程序会注册），一并清掉
+rem �����װʱע���ж����Ϣ���°氲װ�����ע�ᣩ��һ�����
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\bilimusic" /f >nul 2>&1
-echo   · 已清理注册表项（如果有）
+echo   �� ������ע��������У�
 
 echo.
-echo   卸载完成。窗口关闭后会自动删除安装目录。
+echo   ж����ɡ����ڹرպ���Զ�ɾ����װĿ¼��
 start "" cmd /c "timeout /t 2 >nul & rmdir /s /q \"%TARGET%\""
 exit

@@ -54,6 +54,8 @@ Get-ChildItem (Join-Path $portable 'lib') -File | Sort-Object Name | ForEach-Obj
     $n++
 }
 if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $stage 'bm.ico') -Force }
+# ship the uninstaller (kept in the repo as a GBK-encoded .bat so cmd parses Chinese correctly)
+Copy-Item (Join-Path $repoRoot 'desktop\tools\uninstall.bat') $stage -Force
 Write-Host ("  {0} payload files staged (all named jNNN.*)" -f ($n - 1))
 $stagedBytes = (Get-ChildItem $stage -File | Measure-Object Length -Sum).Sum
 Write-Host ("  {0} MB" -f [math]::Round($stagedBytes / 1MB, 1))
@@ -69,7 +71,7 @@ start "bilimusic" javaw -Dfile.encoding=UTF-8 -cp "*" com.bilimusic.desktop.Main
 # 安装程序：可自定义目录、界面简洁、完成后询问是否启动；快捷方式直接指向 javaw（无黑窗）
 $installBat = @'
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 setlocal enabledelayedexpansion
 title bilimusic 安装程序
 set "DEF=%LOCALAPPDATA%\Programs\bilimusic"
@@ -111,7 +113,7 @@ echo.
 echo   窗口可以关闭了。
 timeout /t 3 >nul
 '@
-[System.IO.File]::WriteAllText((Join-Path $stage 'install.bat'), $installBat, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Join-Path $stage 'install.bat'), $installBat, ([System.Text.Encoding]::GetEncoding(936)))
 
 @'
 bilimusic desktop
@@ -157,7 +159,7 @@ RunProgram="install.bat"
 GUIMode="2"
 ;!@InstallEnd@!
 "@
-[System.IO.File]::WriteAllText($config, $sfxConfig, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($config, $sfxConfig, ([System.Text.Encoding]::GetEncoding(936)))
 
 $out = [System.IO.File]::Create($outExe)
 try {
