@@ -13,6 +13,18 @@ android {
     namespace = "com.bilimusic.app"
     compileSdk = 35
 
+    signingConfigs {
+        getByName("debug") {
+            // 受限环境（沙箱 / CI）下 ~/.android 可能不可写：AGP 需要在 keystore 旁边创建 .lock 文件，
+            // 会以 AccessDeniedException 失败。用机器级 Gradle 属性把 keystore 指到可写位置即可。
+            // 不设置该属性时行为与原来完全一致（用默认的 ~/.android/debug.keystore）。
+            val customDebugKeystore = providers.gradleProperty("bilimusic.debugKeystore").orNull
+            if (!customDebugKeystore.isNullOrBlank()) {
+                storeFile = file(customDebugKeystore)
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.bilimusic.app"
         minSdk = 26
@@ -82,6 +94,9 @@ ksp {
 }
 
 dependencies {
+    // 纯 JVM 共享层（与 Windows 桌面端共用同一套 WBI 签名 / 接口 DTO / 领域模型）
+    implementation(project(":shared"))
+
     // ---- Compose（BOM 统一版本） ----
     implementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(platform(libs.androidx.compose.bom))

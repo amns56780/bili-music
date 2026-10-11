@@ -3,13 +3,12 @@
 /local.properties
 /.idea/
 .DS_Store
-/build
+# 所有模块的构建产物（app / shared / desktop）
+build/
 /captures
 .externalNativeBuild
 .cxx
 local.properties
-/app/build/
-/app/release/
 
 # Kotlin 编译缓存与错误日志
 .kotlin/
