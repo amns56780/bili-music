@@ -57,6 +57,8 @@ import com.bilimusic.desktop.player.SleepTimer
 import com.bilimusic.desktop.player.Track
 import com.bilimusic.desktop.ui.HomeScreen
 import com.bilimusic.desktop.ui.LoginScreen
+import androidx.compose.foundation.layout.fillMaxWidth
+import com.bilimusic.desktop.ui.AppTitleBar
 import com.bilimusic.desktop.ui.rememberRemoteImage
 
 /**
@@ -103,29 +105,46 @@ fun main() = application {
             }
         },
     ) {
+        // 保留系统标题栏：拖动交给 DWM 处理才够顺滑（这也是 DeepSeek Harness 的做法）。
+        // 这里只把标题栏改成深色，让它跟应用的深色界面协调，不再自己画标题栏。
+        com.bilimusic.desktop.ui.applyWindowsDarkTitleBar(window, "bilimusic")
         BiliMusicDesktopApp(app)
     }
 
-    Tray(
-        icon = appIcon,
-        state = trayState,
-        tooltip = "bilimusic",
-        onAction = { windowVisible = true },
-        menu = {
-            Item("显示窗口", onClick = { windowVisible = true })
-            Separator()
-            Item("播放 / 暂停", onClick = { app.playback?.togglePlayPause() })
-            Item("上一首", onClick = { app.playback?.previous() })
-            Item("下一首", onClick = { app.playback?.next() })
-            Separator()
-            Item("退出", onClick = ::exitApplication)
-        },
-    )
+    // 托盘改用原生 AWT 实现：Compose 自带 Tray 的右键菜单是原生菜单，
+    // 中文字形不受 Compose/Skia 字体控制，UIManager 也管不到，实测会乱码。
+    // 见 NativeTray：逐项 MenuItem.setFont() 才能真正修好。
+    val nativeTray = remember {
+        val iconPng = object {}.javaClass.getResourceAsStream("/icons/ic_launcher.png")
+            ?.use { it.readBytes() }
+            ?: ByteArray(0)
+        com.bilimusic.desktop.ui.NativeTray(
+            iconPng = iconPng,
+            tooltip = "bilimusic",
+            onShowWindow = { windowVisible = true },
+            onPlayPause = { app.playback?.togglePlayPause() },
+            onPrevious = { app.playback?.previous() },
+            onNext = { app.playback?.next() },
+            onExit = ::exitApplication,
+        )
+    }
+    // install() 是幂等的，重复调用没有副作用
+    nativeTray.install()
 }
 
 /** 创建应用级依赖（只建一次） */
 @Composable
 private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): DesktopApp = remember {
+    // The tray right-click menu is rendered by AWT (not Compose/Skia), so it needs an
+    // explicit CJK-capable font - otherwise the menu labels come out as garbage.
+    // Runs before Tray(...) is created.
+    runCatching {
+        System.setProperty("awt.useSystemAAFontSettings", "on")
+        System.setProperty("swing.aatext", "true")
+        val uiFont = java.awt.Font("Microsoft YaHei UI", java.awt.Font.PLAIN, 12)
+        listOf("MenuItem.font", "Menu.font", "PopupMenu.font", "Label.font", "CheckBoxMenuItem.font")
+            .forEach { javax.swing.UIManager.put(it, uiFont) }
+    }
     val storage = DesktopStorage()
     val client = BiliClient.create(storage)
     val auth = AuthController(client = client, scope = scope)
@@ -307,7 +326,7 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                             favFolders = favFolders,
                             showLocalMusic = showLocalMusic,
                             localMusic = localMusicState,
-                            localScanDirs = remember { app.localMusic.scanDirs() },
+                            localScanDirs = localMusicState.dirs,
                             onOpenInput = { text -> app.opener?.open(text) },
                             onLogout = app.auth::logout,
                             onSelectPlaylist = { selectedPlaylistId = it },
@@ -348,6 +367,32 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 app.localMusic.scan()
                             },
                             onScanLocal = app.localMusic::scan,
+                            onAddLocalDir = {
+                                // 目录选择器（Swing JFileChooser 支持纯目录模式，可多选）
+                                val chooser = javax.swing.JFileChooser().apply {
+                                    fileSelectionMode = javax.swing.JFileChooser.DIRECTORIES_ONLY
+                                    dialogTitle = "选择要扫描的音乐文件夹"
+                                    isMultiSelectionEnabled = true
+                                }
+                                if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                    var added = 0
+                                    chooser.selectedFiles.forEach { dir ->
+                                        if (app.localMusic.addDir(dir.absolutePath)) added++
+                                    }
+                                    playback.reportError(
+                                        if (added > 0) "已添加 $added 个扫描目录，正在重新扫描…"
+                                        else "这些文件夹已经在扫描列表里了",
+                                    )
+                                }
+                            },
+                            onRemoveLocalDir = { dir ->
+                                app.localMusic.removeDir(dir)
+                                playback.reportError("已移除扫描目录：$dir")
+                            },
+                            onResetLocalDirs = {
+                                app.localMusic.resetDirs()
+                                playback.reportError("已恢复默认扫描目录（音乐 / 下载 / 桌面）")
+                            },
                             onPlayLocal = { files ->
                                 playback.playQueue(
                                     files.map { file ->

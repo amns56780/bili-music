@@ -77,6 +77,9 @@ fun HomeScreen(
     onPlayLocal: (List<LocalAudioFile>) -> Unit,
     onImportLocal: (List<LocalAudioFile>) -> Unit,
     onDismissLocalMusic: () -> Unit,
+    onAddLocalDir: () -> Unit,
+    onRemoveLocalDir: (String) -> Unit,
+    onResetLocalDirs: () -> Unit,
     sleepTimer: SleepTimerUiState,
     onStartSleep: (Int) -> Unit,
     onCancelSleep: () -> Unit,
@@ -226,10 +229,14 @@ fun HomeScreen(
         if (showLocalMusic) {
             LocalMusicDialog(
                 state = localMusic,
+                custom = localMusic.custom,
                 scanDirs = localScanDirs,
                 onScan = onScanLocal,
                 onPlayAll = onPlayLocal,
                 onImport = onImportLocal,
+                onAddDir = onAddLocalDir,
+                onRemoveDir = onRemoveLocalDir,
+                onResetDirs = onResetLocalDirs,
                 onDismiss = onDismissLocalMusic,
             )
         }

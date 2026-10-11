@@ -37,7 +37,11 @@ import com.bilimusic.desktop.data.LocalMusicUiState
 fun LocalMusicDialog(
     state: LocalMusicUiState,
     scanDirs: List<String>,
+    custom: Boolean,
     onScan: () -> Unit,
+    onAddDir: () -> Unit,
+    onRemoveDir: (String) -> Unit,
+    onResetDirs: () -> Unit,
     onPlayAll: (List<LocalAudioFile>) -> Unit,
     onImport: (List<LocalAudioFile>) -> Unit,
     onDismiss: () -> Unit,
@@ -47,11 +51,41 @@ fun LocalMusicDialog(
         title = { Text("本地音乐（${state.files.size}）") },
         text = {
             Column(modifier = Modifier.width(620.dp)) {
-                Text(
-                    text = "扫描目录：" + scanDirs.joinToString("、") { it.substringAfterLast('\\') },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (custom) "扫描目录（自定义）：" else "扫描目录（默认）：",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    TextButton(onClick = onAddDir) { Text("+ 添加文件夹") }
+                    if (custom) {
+                        TextButton(onClick = onResetDirs) { Text("恢复默认") }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onScan) { Text("重新扫描") }
+                }
+                // 每个扫描目录一行，右侧 × 可移除
+                scanDirs.forEach { dir ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.FolderOpen,
+                            contentDescription = null,
+                            modifier = Modifier.height(14.dp).width(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = dir,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { onRemoveDir(dir) }) { Text("×") }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
 
                 if (state.scanning) {
