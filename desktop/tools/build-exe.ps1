@@ -88,6 +88,8 @@ set "TARGET=%TARGET:"=%"
 echo.
 echo   正在安装到  %TARGET%
 if not exist "%TARGET%" mkdir "%TARGET%"
+rem 关键：先清掉旧版本残留的 jar，否则 -cp "*" 会把旧 jar 一起加载，导致"装了没变化"
+del /q "%TARGET%\*.jar" >nul 2>&1
 xcopy /E /Y /I /Q "%~dp0*" "%TARGET%\" >nul
 if exist "%TARGET%\bm.bat" ren "%TARGET%\bm.bat" bilimusic.bat
 if exist "%TARGET%\bm.ico" ren "%TARGET%\bm.ico" bilimusic.ico
