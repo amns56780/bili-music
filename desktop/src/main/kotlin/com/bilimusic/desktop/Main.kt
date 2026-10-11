@@ -16,8 +16,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -29,12 +31,16 @@ import androidx.compose.ui.window.rememberWindowState
 import com.bilimusic.app.data.player.AudioQualityProvider
 import com.bilimusic.app.data.player.StreamUrlRepository
 import com.bilimusic.app.data.remote.BiliClient
+import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.app.domain.model.AudioQualityOption
 import com.bilimusic.desktop.auth.AuthController
 import com.bilimusic.desktop.auth.AuthUiState
 import com.bilimusic.desktop.data.DesktopStorage
+import com.bilimusic.desktop.data.ImportService
+import com.bilimusic.desktop.data.PlaylistStore
 import com.bilimusic.desktop.media.MediaOpener
 import com.bilimusic.desktop.player.PlaybackController
+import com.bilimusic.desktop.player.Track
 import com.bilimusic.desktop.ui.HomeScreen
 import com.bilimusic.desktop.ui.LoginScreen
 import com.bilimusic.desktop.ui.rememberRemoteImage
@@ -61,6 +67,8 @@ private class DesktopApp(
     val storage: DesktopStorage,
     val client: BiliClient,
     val auth: AuthController,
+    val store: PlaylistStore,
+    val importer: ImportService,
     /** VLC 不可用时为 null（例如没装 VLC），此时只提示不崩溃 */
     val playback: PlaybackController?,
     val opener: MediaOpener?,
@@ -89,10 +97,13 @@ private fun BiliMusicDesktopApp() {
             )
             PlaybackController(client = client, streamUrls = streamUrls, scope = scope)
         }.getOrNull()
+        val store = PlaylistStore()
         DesktopApp(
             storage = storage,
             client = client,
             auth = auth,
+            store = store,
+            importer = ImportService(client, store, scope),
             playback = playback,
             opener = playback?.let { MediaOpener(client, it, scope) },
         )
@@ -128,13 +139,57 @@ private fun BiliMusicDesktopApp() {
                             url = playbackState.current?.coverUrl,
                             client = app.client.okHttpClient,
                         )
+                        // 歌单状态
+                        val playlists by app.store.playlists.collectAsState()
+                        val allSongs by app.store.songs.collectAsState()
+                        val importProgress by app.importer.progress.collectAsState()
+                        var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
+                        var favFolders by remember { mutableStateOf<List<FavFolderDto>>(emptyList()) }
+
+                        val selected = playlists.firstOrNull { it.id == selectedPlaylistId }
+                        val songs = allSongs
+                            .filter { it.playlistId == selectedPlaylistId }
+                            .sortedBy { it.sortOrder }
+
                         HomeScreen(
                             auth = authState,
                             playback = playbackState,
                             cover = cover,
                             controller = playback,
+                            playlists = playlists,
+                            selectedPlaylistId = selectedPlaylistId,
+                            selectedPlaylistTitle = selected?.title.orEmpty(),
+                            songs = songs,
+                            importProgress = importProgress.takeIf { it.running || it.text.isNotBlank() || it.error != null },
+                            favFolders = favFolders,
                             onOpenInput = { text -> app.opener?.open(text) },
                             onLogout = app.auth::logout,
+                            onSelectPlaylist = { selectedPlaylistId = it },
+                            onCreatePlaylist = { title ->
+                                selectedPlaylistId = app.store.createPlaylist(title)
+                            },
+                            onLoadFavFolders = {
+                                authState.account?.let { account ->
+                                    app.importer.loadFavFolders(account.mid) { favFolders = it }
+                                }
+                            },
+                            onImportFolder = { id, title -> app.importer.importFavFolder(id, title) },
+                            onImportToView = app.importer::importToView,
+                            onDismissFavPicker = { favFolders = emptyList() },
+                            onConsumeProgressError = app.importer::consumeError,
+                            onPlayPlaylist = { index ->
+                                val tracks = songs.map { song ->
+                                    Track(
+                                        bvid = song.bvid,
+                                        cid = song.cid,
+                                        title = song.title,
+                                        artist = song.artist.ifBlank { "未知UP主" },
+                                        coverUrl = song.coverUrl,
+                                        durationMs = song.durationMs,
+                                    )
+                                }
+                                playback.playQueue(tracks, index)
+                            },
                         )
                     }
                 }

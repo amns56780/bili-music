@@ -31,14 +31,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.dp
+import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.desktop.auth.AuthUiState
+import com.bilimusic.desktop.data.ImportProgress
+import com.bilimusic.desktop.data.StoredPlaylist
+import com.bilimusic.desktop.data.StoredSong
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.PlaybackUiState
 
 /**
- * 登录后的主界面（Phase 3 版本）：
- * 顶部账号栏 + 「粘贴 BV 号/链接直接播放」+ 播放器面板 + 播放队列。
- * 歌单相关界面在 Phase 4 接入。
+ * 登录后的主界面：
+ * 顶部账号栏 + 「粘贴 BV/链接直接播放」+ 左侧歌单栏 + 歌单详情 + 播放器面板 + 播放队列。
  */
 @Composable
 fun HomeScreen(
@@ -46,18 +49,28 @@ fun HomeScreen(
     playback: PlaybackUiState,
     cover: ImageBitmap?,
     controller: PlaybackController,
+    playlists: List<StoredPlaylist>,
+    selectedPlaylistId: Long?,
+    selectedPlaylistTitle: String,
+    songs: List<StoredSong>,
+    importProgress: ImportProgress?,
+    favFolders: List<FavFolderDto>,
     onOpenInput: (String) -> Unit,
     onLogout: () -> Unit,
+    onSelectPlaylist: (Long) -> Unit,
+    onCreatePlaylist: (String) -> Unit,
+    onLoadFavFolders: () -> Unit,
+    onImportFolder: (Long, String) -> Unit,
+    onImportToView: () -> Unit,
+    onDismissFavPicker: () -> Unit,
+    onConsumeProgressError: () -> Unit,
+    onPlayPlaylist: (Int) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
-    var hint by remember { mutableStateOf<String?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(18.dp)) {
         // 顶部账号栏
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("bilimusic", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.width(16.dp))
             Text(
@@ -73,7 +86,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         // 直接播放入口
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -85,20 +98,14 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(12.dp))
-            Button(
-                onClick = {
-                    hint = null
-                    onOpenInput(input)
-                },
-                enabled = input.isNotBlank(),
-            ) {
+            Button(onClick = { onOpenInput(input) }, enabled = input.isNotBlank()) {
                 Icon(Icons.Outlined.PlayCircle, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("播放")
             }
         }
 
-        (playback.message ?: hint)?.let { message ->
+        playback.message?.let { message ->
             Spacer(Modifier.height(10.dp))
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
@@ -115,20 +122,47 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
         Row(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                PlayerPanel(state = playback, cover = cover, controller = controller)
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = "歌单导入 / 本地音乐 / 定时关闭 / 托盘与全局快捷键会在后续阶段接入",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 左侧：歌单栏
+            Box(modifier = Modifier.width(280.dp)) {
+                PlaylistSidebar(
+                    playlists = playlists,
+                    selectedId = selectedPlaylistId,
+                    progress = importProgress,
+                    favFolders = favFolders,
+                    onSelect = onSelectPlaylist,
+                    onCreate = onCreatePlaylist,
+                    onLoadFavFolders = onLoadFavFolders,
+                    onImportFolder = onImportFolder,
+                    onImportToView = onImportToView,
+                    onDismissFavPicker = onDismissFavPicker,
+                    onConsumeProgressError = onConsumeProgressError,
                 )
             }
-            Spacer(Modifier.width(16.dp))
-            Box(modifier = Modifier.width(340.dp)) {
+
+            Spacer(Modifier.width(14.dp))
+
+            // 中间：歌单详情 + 播放器
+            Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                PlaylistDetail(
+                    playlistTitle = selectedPlaylistTitle,
+                    songs = songs,
+                    currentIndex = playback.index.takeIf { playback.queue.isNotEmpty() } ?: -1,
+                    onPlayAll = { onPlayPlaylist(0) },
+                    onPlayAt = onPlayPlaylist,
+                )
+                PlayerPanel(state = playback, cover = cover, controller = controller)
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            // 右侧：播放队列
+            Box(modifier = Modifier.width(300.dp)) {
                 QueueList(state = playback, onPick = controller::playAt)
             }
         }
