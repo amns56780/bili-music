@@ -40,6 +40,11 @@ B 站音源的 Windows 音乐播放器，与安卓版**共用同一套后端逻�
 # 3) 安装包（需要先安装 WiX Toolset v3：https://wixtoolset.org）
 .\gradlew.bat :desktop:packageMsi     # 产出 .msi
 .\gradlew.bat :desktop:packageExe     # 产出 .exe
+
+# 4) 自解压安装程序 .exe（用 Windows 自带的 IExpress，不需要 WiX / 任何外部工具链）
+#    产物：desktop\build\distributions\bilimusic-setup.exe
+#    双击即安装到 %LOCALAPPDATA%\Programs\bilimusic 并创建桌面快捷方式
+powershell -ExecutionPolicy Bypass -File desktop\tools\build-exe.ps1
 ```
 
 没装 VLC 时程序不会崩溃：会停在提示页，提示安装 VLC 后重启。
