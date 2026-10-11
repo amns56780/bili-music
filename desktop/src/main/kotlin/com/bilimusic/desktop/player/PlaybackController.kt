@@ -56,6 +56,8 @@ class PlaybackController(
     private val streamUrls: StreamUrlRepository,
     private val scope: CoroutineScope,
     private val player: VlcPlayer = VlcPlayer(),
+    /** 已下载的本地文件（有则离线播放，不再取流） */
+    private val downloadedFile: (bvid: String, cid: Long) -> String? = { _, _ -> null },
 ) {
 
     private val _state = MutableStateFlow(PlaybackUiState())
@@ -126,6 +128,18 @@ class PlaybackController(
                 loading = false,
                 message = null,
                 qualityLabel = "本地",
+                durationMs = track.durationMs,
+            )
+            scope.launch { withContext(Dispatchers.IO) { player.play(java.io.File(path).toURI().toString()) } }
+            return
+        }
+
+        // 已下载过：直接离线播放，不再取流（FR-9）
+        downloadedFile(track.bvid, track.cid)?.let { path ->
+            _state.value = _state.value.copy(
+                loading = false,
+                message = null,
+                qualityLabel = "离线",
                 durationMs = track.durationMs,
             )
             scope.launch { withContext(Dispatchers.IO) { player.play(java.io.File(path).toURI().toString()) } }

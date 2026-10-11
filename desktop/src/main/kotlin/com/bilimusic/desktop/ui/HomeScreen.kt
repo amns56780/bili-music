@@ -79,6 +79,9 @@ fun HomeScreen(
     sleepTimer: SleepTimerUiState,
     onStartSleep: (Int) -> Unit,
     onCancelSleep: () -> Unit,
+    downloadBusy: Boolean,
+    onDownload: () -> Unit,
+    extraMessage: String? = null,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -119,7 +122,7 @@ fun HomeScreen(
             }
         }
 
-        playback.message?.let { message ->
+        (playback.message ?: extraMessage)?.let { message ->
             Spacer(Modifier.height(10.dp))
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
@@ -178,6 +181,8 @@ fun HomeScreen(
                     sleepTimer = sleepTimer,
                     onStartSleep = onStartSleep,
                     onCancelSleep = onCancelSleep,
+                    downloadBusy = downloadBusy,
+                    onDownload = onDownload,
                 )
             }
 

@@ -45,6 +45,7 @@ import com.bilimusic.app.domain.model.AudioQualityOption
 import com.bilimusic.desktop.auth.AuthController
 import com.bilimusic.desktop.auth.AuthUiState
 import com.bilimusic.desktop.data.DesktopStorage
+import com.bilimusic.desktop.data.DownloadService
 import com.bilimusic.desktop.data.ImportService
 import com.bilimusic.desktop.data.LocalMusicController
 import com.bilimusic.desktop.data.LocalMusicScanner
@@ -125,19 +126,27 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
     val client = BiliClient.create(storage)
     val auth = AuthController(client = client, scope = scope)
     // VLC 缺失时不要让整个应用崩掉，降级为提示
-    val playback = runCatching {
-        val qualityProvider = AudioQualityProvider {
-            AudioQualityOption.fromNameOrAuto(
-                storage.getString(KEY_AUDIO_QUALITY) ?: AudioQualityOption.AUTO.name,
-            )
-        }
-        val streamUrls = StreamUrlRepository(
-            api = client.api,
-            wbiSigner = client.wbiSigner,
-            qualityProvider = qualityProvider,
-            throttle = client.requestThrottle,
+    val qualityProvider = AudioQualityProvider {
+        AudioQualityOption.fromNameOrAuto(
+            storage.getString(KEY_AUDIO_QUALITY) ?: AudioQualityOption.AUTO.name,
         )
-        PlaybackController(client = client, streamUrls = streamUrls, scope = scope)
+    }
+    val streamUrls = StreamUrlRepository(
+        api = client.api,
+        wbiSigner = client.wbiSigner,
+        qualityProvider = qualityProvider,
+        throttle = client.requestThrottle,
+    )
+    val downloads = DownloadService(client.okHttpClient, streamUrls, scope)
+    // VLC 缺失时不要让整个应用崩掉，降级为提示
+    val playback = runCatching {
+        PlaybackController(
+            client = client,
+            streamUrls = streamUrls,
+            scope = scope,
+            // 已下载的曲子离线播放，不再取流
+            downloadedFile = { bvid, cid -> downloads.localFileFor(bvid, cid)?.absolutePath },
+        )
     }.getOrNull()
     val store = PlaylistStore()
     val sleepTimer = SleepTimer(scope) { stopAfterCurrent ->
@@ -155,6 +164,7 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
         store = store,
         importer = ImportService(client, store, scope),
         localMusic = LocalMusicController(LocalMusicScanner(), store, scope),
+        downloads = downloads,
         playback = playback,
         opener = playback?.let { MediaOpener(client, it, scope) },
         sleepTimer = sleepTimer,
@@ -203,6 +213,7 @@ private class DesktopApp(
     val store: PlaylistStore,
     val importer: ImportService,
     val localMusic: LocalMusicController,
+    val downloads: DownloadService,
     /** VLC 不可用时为 null（例如没装 VLC），此时只提示不崩溃 */
     val playback: PlaybackController?,
     val opener: MediaOpener?,
@@ -250,6 +261,7 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                         var showLocalMusic by remember { mutableStateOf(false) }
                         val localMusicState by app.localMusic.state.collectAsState()
                         val sleepState by app.sleepTimer.state.collectAsState()
+                        val downloadState by app.downloads.state.collectAsState()
 
                         val selected = playlists.firstOrNull { it.id == selectedPlaylistId }
                         val songs = allSongs
@@ -326,6 +338,11 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                             sleepTimer = sleepState,
                             onStartSleep = { minutes -> app.sleepTimer.start(minutes) },
                             onCancelSleep = app.sleepTimer::cancel,
+                            downloadBusy = downloadState.busy,
+                            onDownload = {
+                                playbackState.current?.let { track -> app.downloads.download(track) }
+                            },
+                            extraMessage = downloadState.message,
                         )
                     }
                 }

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RepeatOne
@@ -68,6 +69,8 @@ fun PlayerPanel(
     sleepTimer: SleepTimerUiState,
     onStartSleep: (Int) -> Unit,
     onCancelSleep: () -> Unit,
+    downloadBusy: Boolean,
+    onDownload: () -> Unit,
 ) {
     Surface(
         shape = MaterialTheme.shapes.large,
@@ -186,6 +189,19 @@ fun PlayerPanel(
 
                 IconButton(onClick = controller::next, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "下一首", modifier = Modifier.size(28.dp))
+                }
+
+                // 下载当前这首（离线缓存）
+                IconButton(onClick = onDownload, enabled = state.current != null && !downloadBusy) {
+                    if (downloadBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    } else {
+                        Icon(
+                            Icons.Outlined.Download,
+                            contentDescription = "下载到本地",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
 
                 Spacer(Modifier.width(24.dp))
