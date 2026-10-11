@@ -68,3 +68,55 @@ compose.desktop {
         }
     }
 }
+
+// ---- 便携版（不依赖 jpackage / WiX）----
+// jpackage 在受限环境里会因写入被拒而失败；这里用 Gradle 自己把运行时依赖 + 启动脚本
+// 打成一个 zip，解压后双击 bilimusic.bat 即可运行（需要机器上有 JRE 17+）。
+val portableRoot = layout.buildDirectory.dir("portable/bilimusic")
+
+val portableDist by tasks.registering(Sync::class) {
+    into(portableRoot)
+    from(configurations.runtimeClasspath.get()) { into("lib") }
+    from(tasks.named("jar")) { into("lib") }
+}
+
+val portableLauncher by tasks.registering {
+    dependsOn(portableDist)
+    outputs.upToDateWhen { false }
+    doLast {
+        val dir = portableRoot.get().asFile
+        dir.mkdirs()
+        File(dir, "bilimusic.bat").writeText(
+            "@echo off\r\n" +
+                "cd /d %~dp0\r\n" +
+                "start \"bilimusic\" javaw -Dfile.encoding=UTF-8 -cp \"lib/*\" com.bilimusic.desktop.MainKt\r\n",
+        )
+        File(dir, "使用说明.txt").writeText(
+            """
+            bilimusic 桌面版（便携版）
+            ========================
+
+            运行前请确认：
+              1) 已安装 JRE / JDK 17 或更高版本（java 在 PATH 里）
+              2) 已安装 VLC（https://www.videolan.org）—— 播放内核依赖它
+
+            启动：双击 bilimusic.bat
+
+            数据目录：%USERPROFILE%\.bilimusic
+              settings.json   登录 Cookie 与偏好（⚠️ 明文保存，注意保管）
+              playlists.json  歌单与曲目
+              downloads/      已下载的离线音频
+
+            想要「安装包」（.msi/.exe）而不是便携版：
+              gradlew :desktop:packageMsi   （需要先安装 WiX Toolset v3）
+            """.trimIndent(),
+        )
+    }
+}
+
+tasks.register<Zip>("portableZip") {
+    dependsOn(portableLauncher)
+    from(portableRoot)
+    archiveFileName.set("bilimusic-desktop-portable.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("distributions"))
+}
