@@ -82,6 +82,8 @@ fun HomeScreen(
     downloadBusy: Boolean,
     onDownload: () -> Unit,
     extraMessage: String? = null,
+    onCopyTo: (Long, Set<Long>) -> Unit,
+    onMoveTo: (Long, Set<Long>) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -171,8 +173,11 @@ fun HomeScreen(
                     playlistTitle = selectedPlaylistTitle,
                     songs = songs,
                     currentIndex = playback.index.takeIf { playback.queue.isNotEmpty() } ?: -1,
+                    playlists = playlists,
                     onPlayAll = { onPlayPlaylist(0) },
                     onPlayAt = onPlayPlaylist,
+                    onCopyTo = onCopyTo,
+                    onMoveTo = onMoveTo,
                 )
                 PlayerPanel(
                     state = playback,

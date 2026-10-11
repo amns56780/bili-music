@@ -19,6 +19,8 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -241,9 +243,17 @@ fun PlaylistDetail(
     playlistTitle: String,
     songs: List<StoredSong>,
     currentIndex: Int,
+    playlists: List<StoredPlaylist>,
     onPlayAll: () -> Unit,
     onPlayAt: (Int) -> Unit,
+    onCopyTo: (Long, Set<Long>) -> Unit,
+    onMoveTo: (Long, Set<Long>) -> Unit,
 ) {
+    var selectionMode by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    // null=没开菜单；"copy"/"move"=正在挑目标歌单
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    val targets = playlists.filter { it.title != playlistTitle }
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 2.dp) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -260,6 +270,61 @@ fun PlaylistDetail(
                         Spacer(Modifier.width(6.dp))
                         Text("播放全部")
                     }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            selectionMode = !selectionMode
+                            selected = emptySet()
+                        },
+                    ) { Text(if (selectionMode) "退出多选" else "多选") }
+                }
+            }
+
+            // 多选操作栏：全选/反选 + 复制到/移动到另一个歌单
+            if (selectionMode && songs.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("已选 ${selected.size} 首", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { selected = songs.map { it.id }.toSet() }) { Text("全选") }
+                    TextButton(
+                        onClick = {
+                            val all = songs.map { it.id }.toSet()
+                            selected = all - selected
+                        },
+                    ) { Text("反选") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = { menuFor = "copy" },
+                        enabled = selected.isNotEmpty() && targets.isNotEmpty(),
+                    ) { Text("复制到") }
+                    TextButton(
+                        onClick = { menuFor = "move" },
+                        enabled = selected.isNotEmpty() && targets.isNotEmpty(),
+                    ) { Text("移动到") }
+                }
+                if (targets.isEmpty()) {
+                    Text(
+                        text = "需要至少两个歌单才能复制/移动",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // 目标歌单选择（下拉，等价于安卓端那个「复制到哪个歌单」弹窗）
+            DropdownMenu(expanded = menuFor != null, onDismissRequest = { menuFor = null }) {
+                targets.forEach { target ->
+                    DropdownMenuItem(
+                        text = { Text("${target.title}（${target.sourceType}）") },
+                        onClick = {
+                            val ids = selected
+                            if (menuFor == "copy") onCopyTo(target.id, ids) else onMoveTo(target.id, ids)
+                            menuFor = null
+                            selectionMode = false
+                            selected = emptySet()
+                        },
+                    )
                 }
             }
 
@@ -275,16 +340,27 @@ fun PlaylistDetail(
                 LazyColumn {
                     items(songs, key = { it.id }) { song ->
                         val index = songs.indexOf(song)
-                        val selected = index == currentIndex
                         Surface(
-                            color = if (selected) {
+                            color = if (selected.contains(song.id)) {
+                                MaterialTheme.colorScheme.tertiaryContainer
+                            } else if (index == currentIndex) {
                                 MaterialTheme.colorScheme.secondaryContainer
                             } else {
                                 MaterialTheme.colorScheme.surface
                             },
                             shape = MaterialTheme.shapes.small,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                            onClick = { onPlayAt(index) },
+                            onClick = {
+                                if (selectionMode) {
+                                    selected = if (selected.contains(song.id)) {
+                                        selected - song.id
+                                    } else {
+                                        selected + song.id
+                                    }
+                                } else {
+                                    onPlayAt(index)
+                                }
+                            },
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                                 Text(

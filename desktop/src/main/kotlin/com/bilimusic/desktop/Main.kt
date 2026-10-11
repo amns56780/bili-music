@@ -343,6 +343,14 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 playbackState.current?.let { track -> app.downloads.download(track) }
                             },
                             extraMessage = downloadState.message,
+                            onCopyTo = { targetId, ids ->
+                                val added = app.store.copySongsTo(targetId, ids)
+                                playback.reportError("已复制 $added 首（重复的自动跳过）")
+                            },
+                            onMoveTo = { targetId, ids ->
+                                val added = app.store.moveSongsTo(targetId, ids)
+                                playback.reportError("已移动 $added 首（重复的自动跳过）")
+                            },
                         )
                     }
                 }
