@@ -51,6 +51,7 @@ fun LoginScreen(
     onStartQr: () -> Unit,
     onSubmitCookie: (String) -> Unit,
     onConsumeError: () -> Unit,
+    onBack: () -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var cookieText by remember { mutableStateOf("") }
@@ -67,11 +68,13 @@ fun LoginScreen(
             Text("bilimusic", style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "B站音源桌面播放器 · 登录后即可导入歌单并取流播放",
+                text = "登录后即可导入 B 站歌单、在线听歌。\n本地音乐不需要登录，可以直接返回使用。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onBack) { Text("← 返回，先听本地音乐") }
             Spacer(Modifier.height(28.dp))
 
             TabRow(selectedTabIndex = tab, modifier = Modifier.width(520.dp)) {

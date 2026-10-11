@@ -305,13 +305,14 @@ fun PlaylistDetail(
     onPlayAt: (Int) -> Unit,
     onCopyTo: (Long, Set<Long>) -> Unit,
     onMoveTo: (Long, Set<Long>) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var selectionMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
     // null=没开菜单；"copy"/"move"=正在挑目标歌单
     var menuFor by remember { mutableStateOf<String?>(null) }
     val targets = playlists.filter { it.title != playlistTitle }
-    Surface(shape = MaterialTheme.shapes.large, tonalElevation = 2.dp) {
+    Surface(shape = MaterialTheme.shapes.large, tonalElevation = 2.dp, modifier = modifier) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -394,7 +395,7 @@ fun PlaylistDetail(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                LazyColumn {
+                LazyColumn(modifier = Modifier.weight(1f)) {
                     items(songs, key = { it.id }) { song ->
                         val index = songs.indexOf(song)
                         Surface(

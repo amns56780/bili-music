@@ -1,11 +1,10 @@
 # Build a self-extracting Windows installer (EXE) for the desktop app.
 #
-# Why not jpackage: `packageExe` / `packageMsi` need the WiX Toolset, and jpackage
-# writes through child processes (blocked in some restricted environments).
-# IExpress ships with Windows, needs no toolchain, and produces a normal .exe.
-#
-# Note: the payload is staged FLAT (all jars in the package root) because IExpress
-# is unreliable with sub-directory entries in the SED file list.
+# Toolchain: 7-Zip's standalone SFX module (downloaded into .tools/, never installed).
+# Why not IExpress: IExpress silently drops files when the SED file list contains
+# long file names or sub-directories - the produced installer then fails with
+# "创建进程 ...\IXP000.TMP\install.bat 时出错" because nothing was extracted.
+# 7-Zip SFX is reliable and, unlike IExpress, can be verified from the command line.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File desktop\tools\build-exe.ps1
@@ -21,11 +20,18 @@ $distDir = Join-Path $repoRoot 'desktop\build\distributions'
 $outExe = Join-Path $distDir 'bilimusic-setup.exe'
 $iconSrc = Join-Path $repoRoot 'desktop\src\main\resources\icons\bilimusic.ico'
 
-Write-Host '[1/6] Portable payload'
+# 7-Zip standalone tools (kept outside the repo)
+$toolsDir = Join-Path (Split-Path $repoRoot -Parent) '.tools\7zip-extracted'
+$sevenZip = Join-Path $toolsDir '7z.exe'
+$sfxModule = Join-Path $toolsDir '7z.sfx'
+if (-not (Test-Path $sevenZip) -or -not (Test-Path $sfxModule)) {
+    throw "7-Zip standalone tools not found at $toolsDir. See desktop/README.md (build-exe section)."
+}
+
+Write-Host '[1/5] Portable payload'
 if (Test-Path (Join-Path $portable 'lib')) {
-    Write-Host '  reusing existing desktop\build\portable\bilimusic'
+    Write-Host '  reusing desktop\build\portable\bilimusic'
 } else {
-    Write-Host '  building it (gradle :desktop:portableDist) - requires JAVA_HOME / GRADLE_USER_HOME if set in your env'
     Push-Location $repoRoot
     try {
         & .\gradlew.bat :desktop:portableDist --console=plain
@@ -35,119 +41,131 @@ if (Test-Path (Join-Path $portable 'lib')) {
     }
 }
 
-Write-Host '[2/6] Staging a FLAT package root'
+Write-Host '[2/5] Staging a flat package root with 8.3-safe names'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-# lib/ 下的 jar 全部摊平到根目录（IExpress 更可靠），用 -cp "*" 启动
-Get-ChildItem (Join-Path $portable 'lib') -File | ForEach-Object { Copy-Item $_.FullName $stage -Force }
-$libCount = (Get-ChildItem $stage -File).Count
-Write-Host ("  {0} jars staged" -f $libCount)
-if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $stage 'bilimusic.ico') -Force }
+# jar 统一改成 j001.jar 这种短名；启动脚本用 -cp "*" 通配，所以文件名无所谓。
+$n = 1
+Get-ChildItem (Join-Path $portable 'lib') -File | Sort-Object Name | ForEach-Object {
+    $ext = if ($_.Extension) { $_.Extension } else { '.bin' }
+    Copy-Item $_.FullName (Join-Path $stage ('j{0:d3}{1}' -f $n, $ext)) -Force
+    $n++
+}
+if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $stage 'bm.ico') -Force }
+Write-Host ("  {0} payload files staged (all named jNNN.*)" -f ($n - 1))
+$stagedBytes = (Get-ChildItem $stage -File | Measure-Object Length -Sum).Sum
+Write-Host ("  {0} MB" -f [math]::Round($stagedBytes / 1MB, 1))
 
-Write-Host '[3/6] Writing launcher and installer scripts'
+Write-Host '[3/5] Writing launcher / installer / readme'
+# 启动脚本（调试用；正常使用走快捷方式，直接调 javaw，不会出现控制台窗口）
 @'
 @echo off
 cd /d %~dp0
 start "bilimusic" javaw -Dfile.encoding=UTF-8 -cp "*" com.bilimusic.desktop.MainKt
-'@ | Set-Content (Join-Path $stage 'bilimusic.bat') -Encoding ASCII
+'@ | Set-Content (Join-Path $stage 'bm.bat') -Encoding ASCII
 
-@'
+# 安装程序：可自定义目录、界面简洁、完成后询问是否启动；快捷方式直接指向 javaw（无黑窗）
+$installBat = @'
 @echo off
-setlocal
-set "TARGET=%LOCALAPPDATA%\Programs\bilimusic"
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+title bilimusic 安装程序
+set "DEF=%LOCALAPPDATA%\Programs\bilimusic"
 echo.
-echo   Installing bilimusic to:
-echo   %TARGET%
+echo   ================================================
+echo      bilimusic 桌面版 · 安装程序
+echo   ================================================
 echo.
+echo   默认安装到：
+echo     %DEF%
+echo.
+set "TARGET="
+set /p "TARGET=   直接回车用默认目录，或粘贴自定义路径后回车："
+if "%TARGET%"=="" set "TARGET=%DEF%"
+set "TARGET=%TARGET:"=%"
+echo.
+echo   正在安装到  %TARGET%
 if not exist "%TARGET%" mkdir "%TARGET%"
 xcopy /E /Y /I /Q "%~dp0*" "%TARGET%\" >nul
-powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $lnk=$ws.CreateShortcut([Environment]::GetFolderPath('Desktop')+'\bilimusic.lnk'); $lnk.TargetPath='%TARGET%\bilimusic.bat'; $lnk.WorkingDirectory='%TARGET%'; $lnk.IconLocation='%TARGET%\bilimusic.ico'; $lnk.Description='bilimusic'; $lnk.Save()"
-echo   Done. Desktop shortcut "bilimusic" created.
-echo   NOTE: VLC must be installed (https://www.videolan.org) for playback.
+if exist "%TARGET%\bm.bat" ren "%TARGET%\bm.bat" bilimusic.bat
+if exist "%TARGET%\bm.ico" ren "%TARGET%\bm.ico" bilimusic.ico
+
+rem 找到 javaw，让快捷方式直接指向它（避免弹出黑色控制台窗口）
+set "JAVAW=javaw"
+for /f "delims=" %%i in ('where javaw 2^>nul') do set "JAVAW=%%i"
+powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $lnk=$ws.CreateShortcut([Environment]::GetFolderPath('Desktop')+'\bilimusic.lnk'); $lnk.TargetPath='%JAVAW%'; $lnk.Arguments='-Dfile.encoding=UTF-8 -cp \"%TARGET%\*\" com.bilimusic.desktop.MainKt'; $lnk.WorkingDirectory='%TARGET%'; $lnk.IconLocation='%TARGET%\bilimusic.ico'; $lnk.Description='bilimusic'; $lnk.Save()"
+
 echo.
-start "" "%TARGET%\bilimusic.bat"
-'@ | Set-Content (Join-Path $stage 'install.bat') -Encoding ASCII
+echo   安装完成 ✓  桌面已创建快捷方式「bilimusic」
+echo   提示：播放需要系统已安装 VLC（https://www.videolan.org）
+echo.
+choice /c YN /n /m "   现在启动 bilimusic? [Y/N] "
+if errorlevel 2 goto :done
+start "" "%JAVAW%" -Dfile.encoding=UTF-8 -cp "%TARGET%\*" com.bilimusic.desktop.MainKt
+:done
+echo.
+echo   窗口可以关闭了。
+timeout /t 3 >nul
+'@
+[System.IO.File]::WriteAllText((Join-Path $stage 'install.bat'), $installBat, (New-Object System.Text.UTF8Encoding($false)))
 
 @'
-bilimusic desktop (portable / installer build)
+bilimusic desktop
 
 Requirements before running:
-  1) A JRE or JDK 17 or newer, with `java` on PATH
+  1) A JRE or JDK 17 or newer, with java on PATH
   2) VLC installed (https://www.videolan.org) - used as the playback engine
 
-Run:
-  - double-click bilimusic.bat
-Installed copy (if you used bilimusic-setup.exe):
-  - %LOCALAPPDATA%\Programs\bilimusic
+Run: double-click bilimusic.bat
+Installed copy (if you used bilimusic-setup.exe): %LOCALAPPDATA%\Programs\bilimusic
 
 Data directory: %USERPROFILE%\.bilimusic
-  settings.json   login cookie + preferences  (stored in PLAIN TEXT - keep it private)
+  settings.json   login cookie + preferences (PLAIN TEXT - keep it private)
   playlists.json  playlists and songs
   downloads\      downloaded audio for offline playback
-'@ | Set-Content (Join-Path $stage 'README.txt') -Encoding ASCII
+'@ | Set-Content (Join-Path $stage 'readme.txt') -Encoding ASCII
 
-# IExpress SED is read as ANSI: file names must be ASCII
-Get-ChildItem $stage -File | Where-Object { $_.Name -match '[^\x20-\x7E]' } | ForEach-Object {
-    $ascii = ($_.Name -replace '[^\x20-\x7E]', '_')
-    Write-Host ("  renaming {0} -> {1}" -f $_.Name, $ascii)
-    Rename-Item $_.FullName $ascii -Force
-}
+if (-not (Test-Path (Join-Path $stage 'install.bat'))) { throw 'install.bat missing' }
 
-Write-Host '[4/6] Generating IExpress SED'
+Write-Host '[4/5] Packing with 7-Zip and attaching the SFX module'
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-$files = Get-ChildItem $stage -File | ForEach-Object { $_.Name }
-if ($files -notcontains 'install.bat') { throw 'install.bat missing from package list' }
-if ($files -notcontains 'bilimusic.bat') { throw 'bilimusic.bat missing from package list' }
+$archive = Join-Path $repoRoot 'desktop\build\tmp\bilimusic-payload.7z'
+$config = Join-Path $repoRoot 'desktop\build\tmp\bilimusic-sfx-config.txt'
+New-Item -ItemType Directory -Force -Path (Split-Path $archive) | Out-Null
+Remove-Item $archive, $config -Force -ErrorAction SilentlyContinue
 
-$i = 0
-$strings = ($files | ForEach-Object { $line = "FILE$i=`"$_`""; $i++; $line }) -join "`r`n"
-$i = 0
-$srcList = ($files | ForEach-Object { $line = "%FILE$i%="; $i++; $line }) -join "`r`n"
-
-$sed = @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=0
-UseLongFileName=1
-InsideCompressed=0
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=
-DisplayLicense=
-FinishMessage=
-TargetName=$outExe
-FriendlyName=bilimusic
-AppLaunched=install.bat
-PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
-SourceFiles=SourceFiles
-[Strings]
-$strings
-[SourceFiles]
-SourceFiles0=$stage\
-[SourceFiles0]
-$srcList
-"@
-$sedFile = Join-Path $env:TEMP 'bilimusic.sed'
-[System.IO.File]::WriteAllText($sedFile, $sed, [System.Text.Encoding]::GetEncoding(936))
-Write-Host ("  {0} files listed (install.bat verified present)" -f $files.Count)
-Write-Host ("  SED: {0}" -f $sedFile)
-
-Write-Host '[5/6] Running IExpress (may take a few minutes)'
-$proc = Start-Process -FilePath "$env:WINDIR\System32\iexpress.exe" `
-    -ArgumentList '/N', '/Q', $sedFile -Wait -PassThru -WindowStyle Hidden
-if ($proc.ExitCode -ne 0) { throw "iexpress failed with exit code $($proc.ExitCode)" }
-
-Write-Host '[6/6] Done'
-if (Test-Path $outExe) {
-    $size = [math]::Round((Get-Item $outExe).Length / 1MB, 2)
-    Write-Host ("  {0}  ({1} MB)" -f $outExe, $size)
-} else {
-    throw "expected output not found: $outExe"
+# 7z 正常也会往 stderr 写进度，Stop 模式下会被误判为致命错误，这里临时放开
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & $sevenZip a -t7z -mx=5 $archive "$stage\*" | Out-Null
+} finally {
+    $ErrorActionPreference = $prevEap
 }
+if (-not (Test-Path $archive)) { throw '7z archive creation failed' }
+Write-Host ("  archive {0} MB" -f [math]::Round((Get-Item $archive).Length / 1MB, 1))
+
+# 7z.sfx 的配置必须是 UTF-8 无 BOM
+$sfxConfig = @"
+;!@Install@!UTF-8!
+Title="bilimusic"
+RunProgram="install.bat"
+GUIMode="2"
+;!@InstallEnd@!
+"@
+[System.IO.File]::WriteAllText($config, $sfxConfig, (New-Object System.Text.UTF8Encoding($false)))
+
+$out = [System.IO.File]::Create($outExe)
+try {
+    foreach ($part in @($sfxModule, $config, $archive)) {
+        $bytes = [System.IO.File]::ReadAllBytes($part)
+        $out.Write($bytes, 0, $bytes.Length)
+    }
+} finally {
+    $out.Close()
+}
+
+Write-Host '[5/5] Done'
+if (-not (Test-Path $outExe)) { throw "expected output not found: $outExe" }
+Write-Host ("  {0}  ({1} MB)" -f $outExe, [math]::Round((Get-Item $outExe).Length / 1MB, 2))
+Remove-Item $archive -Force -ErrorAction SilentlyContinue

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.Button
@@ -86,6 +87,7 @@ fun HomeScreen(
     onMoveTo: (Long, Set<Long>) -> Unit,
     onImportSeason: (String) -> Unit,
     onImportSpace: (String) -> Unit,
+    onRequestLogin: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -94,16 +96,31 @@ fun HomeScreen(
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("bilimusic", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.width(16.dp))
-            Text(
-                text = auth.account?.let { "${it.name} · ${it.uidText}" } ?: "",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onLogout) {
-                Icon(Icons.Outlined.Logout, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("退出登录")
+            if (auth.account != null) {
+                Text(
+                    text = "${auth.account.name} · ${auth.account.uidText}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onLogout) {
+                    Icon(Icons.Outlined.Logout, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("退出登录")
+                }
+            } else {
+                // 不强制登录：本地播放随时可用，要网络歌单再登录
+                Text(
+                    text = "未登录 · 本地播放可用",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Button(onClick = onRequestLogin) {
+                    Icon(Icons.Outlined.Login, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("登录 B 站账号")
+                }
             }
         }
 
@@ -169,11 +186,14 @@ fun HomeScreen(
             Spacer(Modifier.width(14.dp))
 
             // 中间：歌单详情 + 播放器
+            // 注意：这里**不能**用 verticalScroll —— 里面的 PlaylistDetail 含 LazyColumn，
+            // 可滚动容器嵌套会导致 "measured with infinity maximum height" 崩溃（踩过）。
             Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 PlaylistDetail(
+                    modifier = Modifier.weight(1f),
                     playlistTitle = selectedPlaylistTitle,
                     songs = songs,
                     currentIndex = playback.index.takeIf { playback.queue.isNotEmpty() } ?: -1,

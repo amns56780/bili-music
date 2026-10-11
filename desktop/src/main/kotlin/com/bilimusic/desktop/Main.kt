@@ -246,22 +246,29 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
             val authState by app.auth.state.collectAsState()
-            when (authState.phase) {
-                AuthUiState.Phase.Checking -> Box(
+            // 本地优先：不强制登录。默认直接进主界面（本地音乐随便听），
+            // 只有要点网络歌单/在线播放时才引导登录。
+            var showLogin by remember { mutableStateOf(false) }
+            LaunchedEffect(authState.phase) {
+                if (authState.phase == AuthUiState.Phase.LoggedIn) showLogin = false
+            }
+            when {
+                authState.phase == AuthUiState.Phase.Checking -> Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
                 }
 
-                AuthUiState.Phase.LoggedOut -> LoginScreen(
+                showLogin -> LoginScreen(
                     state = authState,
                     onStartQr = app.auth::startQrLogin,
                     onSubmitCookie = app.auth::submitCookie,
                     onConsumeError = app.auth::consumeError,
+                    onBack = { showLogin = false },
                 )
 
-                AuthUiState.Phase.LoggedIn -> {
+                else -> {
                     val playback = app.playback
                     if (playback == null) {
                         VlcMissingHint()
@@ -313,7 +320,14 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 }
                             },
                             onImportFolder = { id, title -> app.importer.importFavFolder(id, title) },
-                            onImportToView = app.importer::importToView,
+                            onImportToView = {
+                                if (authState.account == null) {
+                                    showLogin = true
+                                    playback.reportError("导入网络歌单需要先登录 B 站账号")
+                                } else {
+                                    app.importer.importToView()
+                                }
+                            },
                             onDismissFavPicker = { favFolders = emptyList() },
                             onConsumeProgressError = app.importer::consumeError,
                             onPlayPlaylist = { index ->
@@ -371,23 +385,34 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 playback.reportError("已移动 $added 首（重复的自动跳过）")
                             },
                             onImportSeason = { raw ->
-                                // 从合集链接里取第一个长数字（season_id / sid），或直接填 ID
-                                val id = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
-                                if (id != null) {
-                                    app.importer.importSeason(id, "合集 $id")
+                                if (authState.account == null) {
+                                    showLogin = true
+                                    playback.reportError("导入网络歌单需要先登录 B 站账号")
                                 } else {
-                                    playback.reportError("没认出合集 ID：请粘贴完整合集链接，或直接填数字 ID")
+                                    // 从合集链接里取第一个长数字（season_id / sid），或直接填 ID
+                                    val id = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
+                                    if (id != null) {
+                                        app.importer.importSeason(id, "合集 $id")
+                                    } else {
+                                        playback.reportError("没认出合集 ID：请粘贴完整合集链接，或直接填数字 ID")
+                                    }
                                 }
                             },
                             onImportSpace = { raw ->
-                                // UP主主页链接里的数字就是 mid
-                                val mid = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
-                                if (mid != null) {
-                                    app.importer.importSpaceUploads(mid)
+                                if (authState.account == null) {
+                                    showLogin = true
+                                    playback.reportError("导入网络歌单需要先登录 B 站账号")
                                 } else {
-                                    playback.reportError("没认出 UP主 UID：请粘贴主页链接，或直接填数字 UID")
+                                    // UP主主页链接里的数字就是 mid
+                                    val mid = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
+                                    if (mid != null) {
+                                        app.importer.importSpaceUploads(mid)
+                                    } else {
+                                        playback.reportError("没认出 UP主 UID：请粘贴主页链接，或直接填数字 UID")
+                                    }
                                 }
                             },
+                            onRequestLogin = { showLogin = true },
                         )
                     }
                 }
