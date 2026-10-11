@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,11 +60,14 @@ fun PlaylistSidebar(
     onImportFolder: (Long, String) -> Unit,
     onImportToView: () -> Unit,
     onOpenLocalMusic: () -> Unit,
+    onImportSeason: (String) -> Unit,
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
 ) {
     var showCreate by remember { mutableStateOf(false) }
     var showFavPicker by remember { mutableStateOf(false) }
+    var showSeason by remember { mutableStateOf(false) }
+    var seasonInput by remember { mutableStateOf("") }
     var newTitle by remember { mutableStateOf("") }
 
     Surface(shape = MaterialTheme.shapes.large, tonalElevation = 2.dp) {
@@ -94,6 +98,12 @@ fun PlaylistSidebar(
                 Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("本地音乐（扫描电脑）")
+            }
+
+            TextButton(onClick = { showSeason = true }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.PlaylistAdd, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("导入合集（粘贴合集链接/ID）")
             }
 
             progress?.let { p ->
@@ -224,6 +234,41 @@ fun PlaylistSidebar(
             confirmButton = {
                 TextButton(onClick = { showFavPicker = false; onDismissFavPicker() }) { Text("取消") }
             },
+        )
+    }
+
+    // 合集导入：粘贴合集链接（含 season_id / sid）或直接填数字 ID
+    if (showSeason) {
+        AlertDialog(
+            onDismissRequest = { showSeason = false },
+            title = { Text("导入合集 / 系列") },
+            text = {
+                Column {
+                    Text(
+                        text = "在 B 站打开一个合集，复制地址栏链接（形如 .../channel/collectiondetail?sid=12345），或直接填合集 ID。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = seasonInput,
+                        onValueChange = { seasonInput = it },
+                        singleLine = true,
+                        placeholder = { Text("合集链接或 season_id") },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onImportSeason(seasonInput)
+                        seasonInput = ""
+                        showSeason = false
+                    },
+                    enabled = seasonInput.isNotBlank(),
+                ) { Text("导入") }
+            },
+            dismissButton = { TextButton(onClick = { showSeason = false }) { Text("取消") } },
         )
     }
 }

@@ -155,6 +155,66 @@ class ImportService(
         }
     }
 
+    /** 导入合集 / 系列（粘贴合集链接或 season_id） */
+    fun importSeason(seasonId: Long, title: String) {
+        scope.launch {
+            val name = title.ifBlank { "合集 $seasonId" }
+            _progress.value = ImportProgress(running = true, text = "正在导入合集「$name」…")
+            val playlistId = store.findBySource(PlaylistSourceType.SEASON, name)?.id
+                ?: store.createPlaylist(name, PlaylistSourceType.SEASON)
+
+            val songs = mutableListOf<NewSong>()
+            var page = 1
+            var total = 0
+            while (page <= MAX_PAGES) {
+                val signed = client.wbiSigner.sign(
+                    mapOf(
+                        "season_id" to seasonId.toString(),
+                        "page_num" to page.toString(),
+                        "page_size" to "30",
+                    ),
+                )
+                client.requestThrottle.await()
+                when (val result = apiCall { client.api.seasonArchives(signed) }) {
+                    is ApiResult.Success -> {
+                        val data = result.data
+                        total = data.page?.total ?: total
+                        val archives = data.archives.orEmpty()
+                        if (archives.isEmpty()) break
+                        songs += archives.mapNotNull { item ->
+                            // 合集接口自带 cid，不需要逐条补齐
+                            if (item.bvid.isBlank() || item.cid <= 0L) return@mapNotNull null
+                            NewSong(
+                                bvid = item.bvid,
+                                cid = item.cid,
+                                title = item.title,
+                                artist = name,
+                                coverUrl = item.pic,
+                                durationMs = item.duration * 1000L,
+                            )
+                        }
+                        _progress.value = _progress.value.copy(
+                            text = "正在导入合集「$name」：${songs.size}/${if (total > 0) total else songs.size}",
+                            current = songs.size,
+                            total = total,
+                        )
+                        page++
+                    }
+
+                    is ApiResult.Error -> {
+                        _progress.value = ImportProgress(
+                            error = "合集导入失败：${result.failure.userMessage}",
+                        )
+                        return@launch
+                    }
+                }
+            }
+
+            val added = store.addSongs(playlistId, songs)
+            _progress.value = ImportProgress(text = "合集「$name」导入完成：新增 $added 首")
+        }
+    }
+
     /** 逐条补齐 cid（带节流与进度） */
     private suspend fun resolveCids(songs: List<NewSong>, title: String): List<NewSong> {
         val out = mutableListOf<NewSong>()

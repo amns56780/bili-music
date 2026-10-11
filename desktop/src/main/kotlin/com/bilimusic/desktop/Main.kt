@@ -351,6 +351,15 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 val added = app.store.moveSongsTo(targetId, ids)
                                 playback.reportError("已移动 $added 首（重复的自动跳过）")
                             },
+                            onImportSeason = { raw ->
+                                // 从合集链接里取第一个长数字（season_id / sid），或直接填 ID
+                                val id = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
+                                if (id != null) {
+                                    app.importer.importSeason(id, "合集 $id")
+                                } else {
+                                    playback.reportError("没认出合集 ID：请粘贴完整合集链接，或直接填数字 ID")
+                                }
+                            },
                         )
                     }
                 }
