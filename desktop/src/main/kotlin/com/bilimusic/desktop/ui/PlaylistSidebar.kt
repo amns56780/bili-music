@@ -61,6 +61,7 @@ fun PlaylistSidebar(
     onImportToView: () -> Unit,
     onOpenLocalMusic: () -> Unit,
     onImportSeason: (String) -> Unit,
+    onImportSpace: (String) -> Unit,
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
 ) {
@@ -103,7 +104,7 @@ fun PlaylistSidebar(
             TextButton(onClick = { showSeason = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.PlaylistAdd, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text("导入合集（粘贴合集链接/ID）")
+                Text("导入 UP主投稿 / 合集")
             }
 
             progress?.let { p ->
@@ -237,15 +238,16 @@ fun PlaylistSidebar(
         )
     }
 
-    // 合集导入：粘贴合集链接（含 season_id / sid）或直接填数字 ID
+    // UP主投稿 / 合集导入：粘贴主页或合集链接，也可以直接填数字 ID
     if (showSeason) {
         AlertDialog(
             onDismissRequest = { showSeason = false },
-            title = { Text("导入合集 / 系列") },
+            title = { Text("导入 UP主投稿 / 合集") },
             text = {
                 Column {
                     Text(
-                        text = "在 B 站打开一个合集，复制地址栏链接（形如 .../channel/collectiondetail?sid=12345），或直接填合集 ID。",
+                        text = "· UP主主页：space.bilibili.com/1234567（或直接填 UID）\n" +
+                            "· 合集：.../channel/collectiondetail?sid=12345（或直接填合集 ID）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -254,19 +256,29 @@ fun PlaylistSidebar(
                         value = seasonInput,
                         onValueChange = { seasonInput = it },
                         singleLine = true,
-                        placeholder = { Text("合集链接或 season_id") },
+                        placeholder = { Text("主页链接 / UID / 合集链接 / 合集 ID") },
                     )
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        onImportSeason(seasonInput)
-                        seasonInput = ""
-                        showSeason = false
-                    },
-                    enabled = seasonInput.isNotBlank(),
-                ) { Text("导入") }
+                Row {
+                    TextButton(
+                        onClick = {
+                            onImportSpace(seasonInput)
+                            seasonInput = ""
+                            showSeason = false
+                        },
+                        enabled = seasonInput.isNotBlank(),
+                    ) { Text("导入 UP主投稿") }
+                    TextButton(
+                        onClick = {
+                            onImportSeason(seasonInput)
+                            seasonInput = ""
+                            showSeason = false
+                        },
+                        enabled = seasonInput.isNotBlank(),
+                    ) { Text("导入合集") }
+                }
             },
             dismissButton = { TextButton(onClick = { showSeason = false }) { Text("取消") } },
         )

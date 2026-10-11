@@ -6,6 +6,7 @@ import com.bilimusic.app.data.remote.apiCall
 import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.app.domain.model.PlaylistSourceType
 import com.bilimusic.app.util.AppLog
+import com.bilimusic.app.util.BiliLinkParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -152,6 +153,73 @@ class ImportService(
                     error = "「$title」导入失败：${result.failure.userMessage}",
                 )
             }
+        }
+    }
+
+    /** 导入 UP 主投稿（粘贴 UP 主主页链接或 UID） */
+    fun importSpaceUploads(mid: Long, uname: String = "") {
+        scope.launch {
+            val name = uname.ifBlank { "UP主 $mid" }
+            _progress.value = ImportProgress(running = true, text = "正在导入「$name」的投稿…")
+            val playlistId = store.findBySource(PlaylistSourceType.UPLOAD, name)?.id
+                ?: store.createPlaylist(name, PlaylistSourceType.UPLOAD)
+
+            val collected = mutableListOf<NewSong>()
+            var page = 1
+            var total = 0
+            while (page <= MAX_PAGES) {
+                val signed = client.wbiSigner.sign(
+                    mapOf(
+                        "mid" to mid.toString(),
+                        "pn" to page.toString(),
+                        "ps" to "30",
+                        "order" to "pubdate",
+                        "platform" to "web",
+                        "web_location" to "1550101",
+                    ),
+                )
+                client.requestThrottle.await()
+                when (val result = apiCall { client.api.spaceArcSearch(signed) }) {
+                    is ApiResult.Success -> {
+                        val data = result.data
+                        total = data.page?.count ?: total
+                        val vlist = data.list?.vlist.orEmpty()
+                        if (vlist.isEmpty()) break
+                        collected += vlist.mapNotNull { item ->
+                            if (item.bvid.isBlank()) return@mapNotNull null
+                            NewSong(
+                                bvid = item.bvid,
+                                // 投稿列表接口不给 cid，先占位，后面统一补齐
+                                cid = 0L,
+                                title = item.title,
+                                artist = name,
+                                coverUrl = item.pic,
+                                durationMs = BiliLinkParser.parseDurationText(item.length),
+                            )
+                        }
+                        _progress.value = _progress.value.copy(
+                            text = "正在导入「$name」：已读取 ${collected.size}/${if (total > 0) total else collected.size}",
+                            current = collected.size,
+                            total = total,
+                        )
+                        page++
+                    }
+
+                    is ApiResult.Error -> {
+                        _progress.value = ImportProgress(
+                            error = "UP主投稿导入失败：${result.failure.userMessage}",
+                        )
+                        return@launch
+                    }
+                }
+            }
+
+            val withCid = resolveCids(collected, name)
+            val added = store.addSongs(playlistId, withCid)
+            _progress.value = ImportProgress(
+                text = "「$name」导入完成：新增 $added 首" +
+                    if (withCid.size < collected.size) "，${collected.size - withCid.size} 首取不到音频轨道已跳过" else "",
+            )
         }
     }
 

@@ -360,6 +360,15 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     playback.reportError("没认出合集 ID：请粘贴完整合集链接，或直接填数字 ID")
                                 }
                             },
+                            onImportSpace = { raw ->
+                                // UP主主页链接里的数字就是 mid
+                                val mid = Regex("""\d{3,}""").find(raw)?.value?.toLongOrNull()
+                                if (mid != null) {
+                                    app.importer.importSpaceUploads(mid)
+                                } else {
+                                    playback.reportError("没认出 UP主 UID：请粘贴主页链接，或直接填数字 UID")
+                                }
+                            },
                         )
                     }
                 }

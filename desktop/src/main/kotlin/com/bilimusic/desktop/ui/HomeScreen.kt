@@ -85,6 +85,7 @@ fun HomeScreen(
     onCopyTo: (Long, Set<Long>) -> Unit,
     onMoveTo: (Long, Set<Long>) -> Unit,
     onImportSeason: (String) -> Unit,
+    onImportSpace: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -159,6 +160,7 @@ fun HomeScreen(
                     onImportToView = onImportToView,
                     onOpenLocalMusic = onOpenLocalMusic,
                     onImportSeason = onImportSeason,
+                    onImportSpace = onImportSpace,
                     onDismissFavPicker = onDismissFavPicker,
                     onConsumeProgressError = onConsumeProgressError,
                 )
