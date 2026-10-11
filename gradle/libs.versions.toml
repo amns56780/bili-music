@@ -33,6 +33,7 @@ javaxInject = "1"
 # --- 桌面端（Compose Multiplatform + VLC）---
 composeMultiplatform = "1.7.3"
 vlcj = "4.8.2"
+jnaPlatform = "5.12.1"
 
 junit = "4.13.2"
 androidxJunit = "1.2.1"
@@ -89,6 +90,8 @@ javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "j
 
 # --- 桌面端播放内核：VLC（需要系统已安装 VLC）---
 vlcj = { group = "uk.co.caprica", name = "vlcj", version.ref = "vlcj" }
+# 全局媒体键用（vlcj 已传递依赖它，这里显式声明以便编译期直接引用）
+jna-platform = { group = "net.java.dev.jna", name = "jna-platform", version.ref = "jnaPlatform" }
 
 # --- Storage / prefs ---
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }

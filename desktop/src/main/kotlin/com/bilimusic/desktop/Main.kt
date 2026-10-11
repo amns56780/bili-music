@@ -51,6 +51,7 @@ import com.bilimusic.desktop.data.LocalMusicController
 import com.bilimusic.desktop.data.LocalMusicScanner
 import com.bilimusic.desktop.data.PlaylistStore
 import com.bilimusic.desktop.media.MediaOpener
+import com.bilimusic.desktop.player.GlobalHotkeys
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.SleepTimer
 import com.bilimusic.desktop.player.Track
@@ -149,6 +150,16 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
         )
     }.getOrNull()
     val store = PlaylistStore()
+    // 系统级全局媒体键：注册到 Win32（被占用时只记日志，不影响使用）
+    val hotkeys = playback?.let { player ->
+        runCatching {
+            GlobalHotkeys(
+                onPlayPause = { player.togglePlayPause() },
+                onNext = { player.next() },
+                onPrevious = { player.previous() },
+            ).also { it.start() }
+        }.getOrNull()
+    }
     val sleepTimer = SleepTimer(scope) { stopAfterCurrent ->
         if (stopAfterCurrent) {
             // 等当前这首播完再停（由播放器的曲末回调执行）
@@ -168,6 +179,7 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
         playback = playback,
         opener = playback?.let { MediaOpener(client, it, scope) },
         sleepTimer = sleepTimer,
+        hotkeys = hotkeys,
     )
 }
 
@@ -218,6 +230,8 @@ private class DesktopApp(
     val playback: PlaybackController?,
     val opener: MediaOpener?,
     val sleepTimer: SleepTimer,
+    /** 系统级全局媒体键（注册失败时为 null，不影响其它功能） */
+    val hotkeys: GlobalHotkeys?,
 )
 
 @Composable

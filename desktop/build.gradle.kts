@@ -32,6 +32,8 @@ dependencies {
     implementation(libs.zxing.core)
     // 播放内核：VLC（兼容性最好，B站返回的 m4a/aac/flac 都能放）
     implementation(libs.vlcj)
+    // 系统级全局媒体键：直接用 JNA 调 Win32 RegisterHotKey（vlcj 已带 JNA，这里显式声明便于编译期使用）
+    implementation(libs.jna.platform)
 
     testImplementation(libs.junit)
 }
