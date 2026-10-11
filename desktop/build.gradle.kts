@@ -40,6 +40,16 @@ compose.desktop {
     application {
         mainClass = "com.bilimusic.desktop.MainKt"
 
+        // 受限环境（沙箱 / CI）里系统临时目录可能不可用，skiko 解包原生库会失败。
+        // 用机器级 Gradle 属性把临时目录指到可写位置；不设置时行为与默认一致。
+        providers.gradleProperty("bilimusic.tmpDir").orNull?.let { tmp ->
+            jvmArgs += "-Djava.io.tmpdir=$tmp"
+        }
+        // 更彻底的办法：直接指定 skiko 原生库（skiko.library.path），完全跳过解包
+        providers.gradleProperty("bilimusic.skikoLibraryPath").orNull?.let { lib ->
+            jvmArgs += "-Dskiko.library.path=$lib"
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "bilimusic"

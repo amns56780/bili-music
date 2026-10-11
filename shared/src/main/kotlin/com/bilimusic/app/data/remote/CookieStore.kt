@@ -1,7 +1,6 @@
 package com.bilimusic.app.data.remote
 
-import android.util.Log
-import com.bilimusic.app.data.local.prefs.SecurePrefs
+import com.bilimusic.app.util.AppLog
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -12,14 +11,14 @@ import javax.inject.Singleton
 /**
  * 登录 Cookie 仓库（任务书 FR-1）：
  * - 保存 SESSDATA / bili_jct / DedeUserID / DedeUserID__ckMd5 / sid，顺带保存 buvid 等风控相关 Cookie
- * - 加密落盘（SecurePrefs），内存里保留一份供 OkHttp 同步读取
+ * - 落盘通过 [KeyValueStore]（安卓端=加密偏好，桌面端=本地文件），内存里保留一份供 OkHttp 同步读取
  * - 支持从「整段 Cookie 字符串」解析（手动粘贴保底路径）
  *
  * 线程安全：OkHttp 的 CookieJar 会在多个网络线程并发调用。
  */
 @Singleton
 class CookieStore @Inject constructor(
-    private val securePrefs: SecurePrefs,
+    private val storage: KeyValueStore,
     private val json: Json,
 ) {
 
@@ -27,12 +26,12 @@ class CookieStore @Inject constructor(
     private val cookies = LinkedHashMap<String, String>()
 
     init {
-        val raw = securePrefs.preferences.getString(KEY_COOKIE_BLOB, null)
+        val raw = storage.getString(KEY_COOKIE_BLOB)
         if (!raw.isNullOrBlank()) {
             runCatching {
                 val map = json.decodeFromString<Map<String, String>>(raw)
                 cookies.putAll(map)
-            }.onFailure { Log.w(TAG, "读取本地 Cookie 失败，按未登录处理", it) }
+            }.onFailure { AppLog.w(TAG, "读取本地 Cookie 失败，按未登录处理", it) }
         }
     }
 
@@ -86,13 +85,12 @@ class CookieStore @Inject constructor(
     fun clear() {
         synchronized(lock) {
             cookies.clear()
-            securePrefs.preferences.edit().remove(KEY_COOKIE_BLOB).apply()
+            storage.remove(KEY_COOKIE_BLOB)
         }
     }
 
     private fun persistLocked() {
-        val encoded = json.encodeToString(cookies.toMap())
-        securePrefs.preferences.edit().putString(KEY_COOKIE_BLOB, encoded).apply()
+        storage.putString(KEY_COOKIE_BLOB, json.encodeToString(cookies.toMap()))
     }
 
     // ---------------- 解析 ----------------

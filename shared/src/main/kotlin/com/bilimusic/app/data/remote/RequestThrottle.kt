@@ -1,6 +1,6 @@
 package com.bilimusic.app.data.remote
 
-import android.os.SystemClock
+import com.bilimusic.app.util.MonotonicClock
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,10 +14,10 @@ class RequestThrottle @Inject constructor() {
     private var lastRequestAt = 0L
 
     suspend fun await(intervalMs: Long = DEFAULT_INTERVAL_MS) {
-        val now = SystemClock.elapsedRealtime()
+        val now = MonotonicClock.elapsedMs()
         val wait = intervalMs - (now - lastRequestAt)
         if (wait > 0) delay(wait)
-        lastRequestAt = SystemClock.elapsedRealtime()
+        lastRequestAt = MonotonicClock.elapsedMs()
     }
 
     companion object {

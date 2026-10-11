@@ -21,6 +21,7 @@ dependencies {
     // Android 端与 Windows 桌面端都依赖这里，逻辑只写一份
     api(libs.kotlinx.serialization.json)
     api(libs.kotlinx.coroutines.core)
+    api(libs.javax.inject)
     api(libs.okhttp)
     api(libs.retrofit)
     api(libs.retrofit.kotlinx.serialization)

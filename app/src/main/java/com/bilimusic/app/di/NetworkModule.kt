@@ -1,9 +1,11 @@
 package com.bilimusic.app.di
 
 import com.bilimusic.app.BuildConfig
+import com.bilimusic.app.data.local.prefs.SecurePrefs
 import com.bilimusic.app.data.remote.BiliApi
 import com.bilimusic.app.data.remote.BiliCookieJar
 import com.bilimusic.app.data.remote.BiliHeaderInterceptor
+import com.bilimusic.app.data.remote.KeyValueStore
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -35,6 +37,14 @@ object NetworkModule {
         coerceInputValues = true
         encodeDefaults = true
     }
+
+    /**
+     * 共享层（shared 模块）里的 CookieStore 需要一个键值存储，
+     * 安卓端用加密偏好实现；桌面端会换成用户目录下的本地文件。
+     */
+    @Provides
+    @Singleton
+    fun provideKeyValueStore(securePrefs: SecurePrefs): KeyValueStore = securePrefs
 
     @Provides
     @Singleton

@@ -1,9 +1,8 @@
 package com.bilimusic.app.data.remote
 
-import android.os.SystemClock
-import android.util.Log
-import com.bilimusic.app.data.remote.dto.BiliResponse
 import com.bilimusic.app.data.remote.dto.NavData
+import com.bilimusic.app.util.AppLog
+import com.bilimusic.app.util.MonotonicClock
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,6 +15,7 @@ import javax.inject.Singleton
  * → 业务参数加 wts、按 key 升序、值过滤 `!'()*`、拼 query → w_rid = md5(query + mixin_key)。
  *
  * mixin_key 缓存一天，不每个请求都去请求 nav。
+ * 时间源换成 [MonotonicClock]（纯 JVM），日志换成 [AppLog]，行为不变。
  */
 @Singleton
 class WbiSigner @Inject constructor(
@@ -27,7 +27,7 @@ class WbiSigner @Inject constructor(
 
     /** 拿到（必要时刷新）mixin_key。失败时返回上次缓存；从未成功过则返回 null */
     suspend fun ensureMixinKey(forceRefresh: Boolean = false): String? {
-        val now = SystemClock.elapsedRealtime()
+        val now = MonotonicClock.elapsedMs()
         val cached = mixinKey
         if (!forceRefresh && cached != null && now - fetchedAtElapsed < CACHE_TTL_MS) {
             return cached
@@ -36,7 +36,7 @@ class WbiSigner @Inject constructor(
             is ApiResult.Success -> {
                 val key = deriveMixinKeyFromNav(result.data)
                 if (key.isNullOrBlank()) {
-                    Log.w(TAG, "nav 未返回可用的 wbi_img，沿用旧 mixin_key")
+                    AppLog.w(TAG, "nav 未返回可用的 wbi_img，沿用旧 mixin_key")
                     cached
                 } else {
                     mixinKey = key
@@ -46,7 +46,7 @@ class WbiSigner @Inject constructor(
             }
 
             is ApiResult.Error -> {
-                Log.w(TAG, "获取 WBI key 失败：${result.failure.userMessage}")
+                AppLog.w(TAG, "获取 WBI key 失败：${result.failure.userMessage}")
                 cached
             }
         }

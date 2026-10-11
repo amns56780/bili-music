@@ -19,12 +19,25 @@ import javax.inject.Singleton
 @Singleton
 class SecurePrefs @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : com.bilimusic.app.data.remote.KeyValueStore {
 
     val preferences: SharedPreferences = createPreferences(context)
 
     /** true 表示加密存储初始化失败、已降级为明文（仅用于调试与 README 说明） */
     val isFallbackPlain: Boolean = preferences !is EncryptedSharedPreferences
+
+    // ---------------- 共享层（shared 模块）用的键值接口 ----------------
+    // CookieStore 等逻辑在 shared 里，只依赖这个接口，不依赖 Android 的 SharedPreferences
+
+    override fun getString(key: String): String? = preferences.getString(key, null)
+
+    override fun putString(key: String, value: String) {
+        preferences.edit().putString(key, value).apply()
+    }
+
+    override fun remove(key: String) {
+        preferences.edit().remove(key).apply()
+    }
 
     private fun createPreferences(context: Context): SharedPreferences = try {
         val masterKey = MasterKey.Builder(context)
