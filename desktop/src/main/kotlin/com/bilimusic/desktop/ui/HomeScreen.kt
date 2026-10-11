@@ -40,6 +40,7 @@ import com.bilimusic.desktop.data.StoredPlaylist
 import com.bilimusic.desktop.data.StoredSong
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.PlaybackUiState
+import com.bilimusic.desktop.player.SleepTimerUiState
 
 /**
  * 登录后的主界面：
@@ -75,6 +76,9 @@ fun HomeScreen(
     onPlayLocal: (List<LocalAudioFile>) -> Unit,
     onImportLocal: (List<LocalAudioFile>) -> Unit,
     onDismissLocalMusic: () -> Unit,
+    sleepTimer: SleepTimerUiState,
+    onStartSleep: (Int) -> Unit,
+    onCancelSleep: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -167,7 +171,14 @@ fun HomeScreen(
                     onPlayAll = { onPlayPlaylist(0) },
                     onPlayAt = onPlayPlaylist,
                 )
-                PlayerPanel(state = playback, cover = cover, controller = controller)
+                PlayerPanel(
+                    state = playback,
+                    cover = cover,
+                    controller = controller,
+                    sleepTimer = sleepTimer,
+                    onStartSleep = onStartSleep,
+                    onCancelSleep = onCancelSleep,
+                )
             }
 
             Spacer(Modifier.width(14.dp))

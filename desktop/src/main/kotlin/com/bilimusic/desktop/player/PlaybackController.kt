@@ -67,6 +67,9 @@ class PlaybackController(
     /** 当前这首歌对应的 bvid/cid，用于失效重取 */
     private var currentKey: Pair<String, Long>? = null
 
+    /** 定时关闭：置位后当前曲播完就停 */
+    private var stopAfterCurrentTrack = false
+
     private companion object {
         const val TAG = "DesktopPlayback"
         /** 进度回写节流：VLC 每秒回调多次，太频繁会让 UI 抖动 */
@@ -195,6 +198,19 @@ class PlaybackController(
         playCurrent()
     }
 
+    /** 定时关闭：等当前这首自然播完再停 */
+    fun requestStopAfterCurrent() {
+        stopAfterCurrentTrack = true
+        _state.value = _state.value.copy(message = "定时到点：本曲播完将停止播放")
+    }
+
+    /** 立即停止 */
+    fun stopNow() {
+        stopAfterCurrentTrack = false
+        player.stop()
+        _state.value = _state.value.copy(playing = false, message = "已停止播放")
+    }
+
     fun consumeMessage() {
         _state.value = _state.value.copy(message = null)
     }
@@ -224,6 +240,13 @@ class PlaybackController(
     }
 
     private suspend fun onTrackFinished() {
+        // 定时关闭的「等本曲播完再停」优先于自动切歌
+        if (stopAfterCurrentTrack) {
+            stopAfterCurrentTrack = false
+            player.stop()
+            _state.value = _state.value.copy(playing = false, message = "定时到点，本曲播完已停止播放")
+            return
+        }
         when (_state.value.mode) {
             PlayMode.REPEAT_ONE -> playCurrent()
             else -> advance(manual = false)

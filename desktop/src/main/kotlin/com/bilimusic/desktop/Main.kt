@@ -22,11 +22,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import com.bilimusic.app.data.player.AudioQualityProvider
 import com.bilimusic.app.data.player.StreamUrlRepository
@@ -42,6 +51,7 @@ import com.bilimusic.desktop.data.LocalMusicScanner
 import com.bilimusic.desktop.data.PlaylistStore
 import com.bilimusic.desktop.media.MediaOpener
 import com.bilimusic.desktop.player.PlaybackController
+import com.bilimusic.desktop.player.SleepTimer
 import com.bilimusic.desktop.player.Track
 import com.bilimusic.desktop.ui.HomeScreen
 import com.bilimusic.desktop.ui.LoginScreen
@@ -55,13 +65,134 @@ import com.bilimusic.desktop.ui.rememberRemoteImage
  */
 fun main() = application {
     val windowState = rememberWindowState(size = DpSize(1240.dp, 860.dp))
+    var windowVisible by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val trayState = rememberTrayState()
+
+    // 应用级依赖建在 application 作用域，托盘菜单才能直接控制播放
+    val app = rememberDesktopApp(scope)
+
     Window(
-        onCloseRequest = ::exitApplication,
+        // 关闭窗口只收进托盘，音乐继续放（托盘菜单里可真正退出）
+        onCloseRequest = { windowVisible = false },
         state = windowState,
         title = "bilimusic",
+        visible = windowVisible,
+        onKeyEvent = { event ->
+            if (event.type == KeyEventType.KeyDown) {
+                when (event.key) {
+                    Key.Spacebar -> {
+                        app.playback?.togglePlayPause()
+                        true
+                    }
+
+                    Key.MediaPlayPause -> {
+                        app.playback?.togglePlayPause()
+                        true
+                    }
+
+                    else -> false
+                }
+            } else {
+                false
+            }
+        },
     ) {
-        BiliMusicDesktopApp()
+        BiliMusicDesktopApp(app)
     }
+
+    Tray(
+        icon = rememberBilimusicTrayIcon(),
+        state = trayState,
+        tooltip = "bilimusic",
+        onAction = { windowVisible = true },
+        menu = {
+            Item("显示窗口", onClick = { windowVisible = true })
+            Separator()
+            Item("播放 / 暂停", onClick = { app.playback?.togglePlayPause() })
+            Item("上一首", onClick = { app.playback?.previous() })
+            Item("下一首", onClick = { app.playback?.next() })
+            Separator()
+            Item("退出", onClick = ::exitApplication)
+        },
+    )
+}
+
+/** 创建应用级依赖（只建一次） */
+@Composable
+private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): DesktopApp = remember {
+    val storage = DesktopStorage()
+    val client = BiliClient.create(storage)
+    val auth = AuthController(client = client, scope = scope)
+    // VLC 缺失时不要让整个应用崩掉，降级为提示
+    val playback = runCatching {
+        val qualityProvider = AudioQualityProvider {
+            AudioQualityOption.fromNameOrAuto(
+                storage.getString(KEY_AUDIO_QUALITY) ?: AudioQualityOption.AUTO.name,
+            )
+        }
+        val streamUrls = StreamUrlRepository(
+            api = client.api,
+            wbiSigner = client.wbiSigner,
+            qualityProvider = qualityProvider,
+            throttle = client.requestThrottle,
+        )
+        PlaybackController(client = client, streamUrls = streamUrls, scope = scope)
+    }.getOrNull()
+    val store = PlaylistStore()
+    val sleepTimer = SleepTimer(scope) { stopAfterCurrent ->
+        if (stopAfterCurrent) {
+            // 等当前这首播完再停（由播放器的曲末回调执行）
+            playback?.requestStopAfterCurrent()
+        } else {
+            playback?.stopNow()
+        }
+    }
+    DesktopApp(
+        storage = storage,
+        client = client,
+        auth = auth,
+        store = store,
+        importer = ImportService(client, store, scope),
+        localMusic = LocalMusicController(LocalMusicScanner(), store, scope),
+        playback = playback,
+        opener = playback?.let { MediaOpener(client, it, scope) },
+        sleepTimer = sleepTimer,
+    )
+}
+
+/** 托盘图标：用 Skia 画一个圆角方块 + 音符，不依赖额外资源文件 */
+@Composable
+private fun rememberBilimusicTrayIcon(): Painter = remember {
+    val size = 64
+    val pixels = IntArray(size * size)
+    for (y in 0 until size) {
+        for (x in 0 until size) {
+            val inCircle = (x - 32) * (x - 32) + (y - 32) * (y - 32) <= 30 * 30
+            pixels[y * size + x] = if (inCircle) 0xFF6750A4.toInt() else 0x00000000
+        }
+    }
+    val bytes = ByteArray(size * size * 4)
+    pixels.forEachIndexed { i, argb ->
+        val o = i * 4
+        bytes[o] = (argb and 0xFF).toByte()
+        bytes[o + 1] = ((argb shr 8) and 0xFF).toByte()
+        bytes[o + 2] = ((argb shr 16) and 0xFF).toByte()
+        bytes[o + 3] = ((argb shr 24) and 0xFF).toByte()
+    }
+    val bitmap = org.jetbrains.skia.Bitmap().apply {
+        allocN32Pixels(size, size, false)
+        installPixels(
+            org.jetbrains.skia.ImageInfo.makeN32(
+                size,
+                size,
+                org.jetbrains.skia.ColorAlphaType.PREMUL,
+            ),
+            bytes,
+            size * 4,
+        )
+    }
+    BitmapPainter(org.jetbrains.skia.Image.makeFromBitmap(bitmap).toComposeImageBitmap())
 }
 
 /** 应用级依赖（只建一次） */
@@ -75,44 +206,11 @@ private class DesktopApp(
     /** VLC 不可用时为 null（例如没装 VLC），此时只提示不崩溃 */
     val playback: PlaybackController?,
     val opener: MediaOpener?,
+    val sleepTimer: SleepTimer,
 )
 
 @Composable
-private fun BiliMusicDesktopApp() {
-    val scope = rememberCoroutineScope()
-
-    val app = remember {
-        val storage = DesktopStorage()
-        val client = BiliClient.create(storage)
-        val auth = AuthController(client = client, scope = scope)
-        // VLC 缺失时不要让整个应用崩掉，降级为提示
-        val playback = runCatching {
-            val qualityProvider = AudioQualityProvider {
-                AudioQualityOption.fromNameOrAuto(
-                    storage.getString(KEY_AUDIO_QUALITY) ?: AudioQualityOption.AUTO.name,
-                )
-            }
-            val streamUrls = StreamUrlRepository(
-                api = client.api,
-                wbiSigner = client.wbiSigner,
-                qualityProvider = qualityProvider,
-                throttle = client.requestThrottle,
-            )
-            PlaybackController(client = client, streamUrls = streamUrls, scope = scope)
-        }.getOrNull()
-        val store = PlaylistStore()
-        DesktopApp(
-            storage = storage,
-            client = client,
-            auth = auth,
-            store = store,
-            importer = ImportService(client, store, scope),
-            localMusic = LocalMusicController(LocalMusicScanner(), store, scope),
-            playback = playback,
-            opener = playback?.let { MediaOpener(client, it, scope) },
-        )
-    }
-
+private fun BiliMusicDesktopApp(app: DesktopApp) {
     LaunchedEffect(app) { app.auth.bootstrap() }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -151,6 +249,7 @@ private fun BiliMusicDesktopApp() {
                         var favFolders by remember { mutableStateOf<List<FavFolderDto>>(emptyList()) }
                         var showLocalMusic by remember { mutableStateOf(false) }
                         val localMusicState by app.localMusic.state.collectAsState()
+                        val sleepState by app.sleepTimer.state.collectAsState()
 
                         val selected = playlists.firstOrNull { it.id == selectedPlaylistId }
                         val songs = allSongs
@@ -224,6 +323,9 @@ private fun BiliMusicDesktopApp() {
                                 }
                             },
                             onDismissLocalMusic = { showLocalMusic = false },
+                            sleepTimer = sleepState,
+                            onStartSleep = { minutes -> app.sleepTimer.start(minutes) },
+                            onCancelSleep = app.sleepTimer::cancel,
                         )
                     }
                 }

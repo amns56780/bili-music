@@ -15,11 +15,14 @@ import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RepeatOne
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,7 +30,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import com.bilimusic.app.domain.model.PlayMode
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.PlaybackUiState
+import com.bilimusic.desktop.player.SleepTimerUiState
 
 /** 秒 → m:ss */
 private fun formatTime(ms: Long): String {
@@ -56,6 +65,9 @@ fun PlayerPanel(
     state: PlaybackUiState,
     cover: ImageBitmap?,
     controller: PlaybackController,
+    sleepTimer: SleepTimerUiState,
+    onStartSleep: (Int) -> Unit,
+    onCancelSleep: () -> Unit,
 ) {
     Surface(
         shape = MaterialTheme.shapes.large,
@@ -107,6 +119,9 @@ fun PlayerPanel(
                             Chip(state.qualityLabel)
                         }
                         Chip(state.mode.displayName)
+                        if (sleepTimer.running) {
+                            Chip("定时 ${sleepTimer.remainingText}")
+                        }
                         if (state.loading) {
                             CircularProgressIndicator(modifier = Modifier.size(14.dp))
                         }
@@ -174,6 +189,38 @@ fun PlayerPanel(
                 }
 
                 Spacer(Modifier.width(24.dp))
+
+                // 定时关闭：可选分钟数，或取消正在倒计时的定时
+                var sleepMenu by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { sleepMenu = true }) {
+                        Icon(Icons.Outlined.Bedtime, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (sleepTimer.running) sleepTimer.remainingText else "定时")
+                    }
+                    DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
+                        listOf(15, 30, 60, 90).forEach { minutes ->
+                            DropdownMenuItem(
+                                text = { Text("$minutes 分钟后停止（本曲播完）") },
+                                onClick = {
+                                    onStartSleep(minutes)
+                                    sleepMenu = false
+                                },
+                            )
+                        }
+                        if (sleepTimer.running) {
+                            DropdownMenuItem(
+                                text = { Text("取消定时") },
+                                onClick = {
+                                    onCancelSleep()
+                                    sleepMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(16.dp))
 
                 Text("音量", style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.width(8.dp))
