@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.desktop.auth.AuthUiState
 import com.bilimusic.desktop.data.ImportProgress
+import com.bilimusic.desktop.data.LocalAudioFile
+import com.bilimusic.desktop.data.LocalMusicUiState
 import com.bilimusic.desktop.data.StoredPlaylist
 import com.bilimusic.desktop.data.StoredSong
 import com.bilimusic.desktop.player.PlaybackController
@@ -55,6 +57,9 @@ fun HomeScreen(
     songs: List<StoredSong>,
     importProgress: ImportProgress?,
     favFolders: List<FavFolderDto>,
+    showLocalMusic: Boolean,
+    localMusic: LocalMusicUiState,
+    localScanDirs: List<String>,
     onOpenInput: (String) -> Unit,
     onLogout: () -> Unit,
     onSelectPlaylist: (Long) -> Unit,
@@ -65,6 +70,11 @@ fun HomeScreen(
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
     onPlayPlaylist: (Int) -> Unit,
+    onOpenLocalMusic: () -> Unit,
+    onScanLocal: () -> Unit,
+    onPlayLocal: (List<LocalAudioFile>) -> Unit,
+    onImportLocal: (List<LocalAudioFile>) -> Unit,
+    onDismissLocalMusic: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
 
@@ -137,6 +147,7 @@ fun HomeScreen(
                     onLoadFavFolders = onLoadFavFolders,
                     onImportFolder = onImportFolder,
                     onImportToView = onImportToView,
+                    onOpenLocalMusic = onOpenLocalMusic,
                     onDismissFavPicker = onDismissFavPicker,
                     onConsumeProgressError = onConsumeProgressError,
                 )
@@ -165,6 +176,17 @@ fun HomeScreen(
             Box(modifier = Modifier.width(300.dp)) {
                 QueueList(state = playback, onPick = controller::playAt)
             }
+        }
+
+        if (showLocalMusic) {
+            LocalMusicDialog(
+                state = localMusic,
+                scanDirs = localScanDirs,
+                onScan = onScanLocal,
+                onPlayAll = onPlayLocal,
+                onImport = onImportLocal,
+                onDismiss = onDismissLocalMusic,
+            )
         }
     }
 }

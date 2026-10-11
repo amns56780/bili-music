@@ -37,6 +37,8 @@ import com.bilimusic.desktop.auth.AuthController
 import com.bilimusic.desktop.auth.AuthUiState
 import com.bilimusic.desktop.data.DesktopStorage
 import com.bilimusic.desktop.data.ImportService
+import com.bilimusic.desktop.data.LocalMusicController
+import com.bilimusic.desktop.data.LocalMusicScanner
 import com.bilimusic.desktop.data.PlaylistStore
 import com.bilimusic.desktop.media.MediaOpener
 import com.bilimusic.desktop.player.PlaybackController
@@ -69,6 +71,7 @@ private class DesktopApp(
     val auth: AuthController,
     val store: PlaylistStore,
     val importer: ImportService,
+    val localMusic: LocalMusicController,
     /** VLC 不可用时为 null（例如没装 VLC），此时只提示不崩溃 */
     val playback: PlaybackController?,
     val opener: MediaOpener?,
@@ -104,6 +107,7 @@ private fun BiliMusicDesktopApp() {
             auth = auth,
             store = store,
             importer = ImportService(client, store, scope),
+            localMusic = LocalMusicController(LocalMusicScanner(), store, scope),
             playback = playback,
             opener = playback?.let { MediaOpener(client, it, scope) },
         )
@@ -145,6 +149,8 @@ private fun BiliMusicDesktopApp() {
                         val importProgress by app.importer.progress.collectAsState()
                         var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
                         var favFolders by remember { mutableStateOf<List<FavFolderDto>>(emptyList()) }
+                        var showLocalMusic by remember { mutableStateOf(false) }
+                        val localMusicState by app.localMusic.state.collectAsState()
 
                         val selected = playlists.firstOrNull { it.id == selectedPlaylistId }
                         val songs = allSongs
@@ -162,6 +168,9 @@ private fun BiliMusicDesktopApp() {
                             songs = songs,
                             importProgress = importProgress.takeIf { it.running || it.text.isNotBlank() || it.error != null },
                             favFolders = favFolders,
+                            showLocalMusic = showLocalMusic,
+                            localMusic = localMusicState,
+                            localScanDirs = remember { app.localMusic.scanDirs() },
                             onOpenInput = { text -> app.opener?.open(text) },
                             onLogout = app.auth::logout,
                             onSelectPlaylist = { selectedPlaylistId = it },
@@ -190,6 +199,31 @@ private fun BiliMusicDesktopApp() {
                                 }
                                 playback.playQueue(tracks, index)
                             },
+                            onOpenLocalMusic = {
+                                showLocalMusic = true
+                                app.localMusic.scan()
+                            },
+                            onScanLocal = app.localMusic::scan,
+                            onPlayLocal = { files ->
+                                playback.playQueue(
+                                    files.map { file ->
+                                        Track(
+                                            bvid = "local",
+                                            cid = file.path.hashCode().toLong(),
+                                            title = file.title,
+                                            artist = file.folder.ifBlank { "本地文件" },
+                                            localPath = file.path,
+                                        )
+                                    },
+                                    0,
+                                )
+                            },
+                            onImportLocal = { files ->
+                                app.localMusic.importToLocalPlaylist(files)?.let { id ->
+                                    selectedPlaylistId = id
+                                }
+                            },
+                            onDismissLocalMusic = { showLocalMusic = false },
                         )
                     }
                 }

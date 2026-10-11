@@ -21,7 +21,11 @@ data class Track(
     val artist: String,
     val coverUrl: String? = null,
     val durationMs: Long = 0L,
-)
+    /** 非空表示这是本地文件（直接交给 VLC 播，不走 B 站取流） */
+    val localPath: String? = null,
+) {
+    val isLocal: Boolean get() = !localPath.isNullOrBlank()
+}
 
 data class PlaybackUiState(
     val queue: List<Track> = emptyList(),
@@ -112,6 +116,19 @@ class PlaybackController(
         val track = _state.value.current ?: return
         currentKey = track.bvid to track.cid
         player.resetForNewTrack()
+
+        // 本地文件：直接交给 VLC 播，不需要取流
+        track.localPath?.takeIf { it.isNotBlank() }?.let { path ->
+            _state.value = _state.value.copy(
+                loading = false,
+                message = null,
+                qualityLabel = "本地",
+                durationMs = track.durationMs,
+            )
+            scope.launch { withContext(Dispatchers.IO) { player.play(java.io.File(path).toURI().toString()) } }
+            return
+        }
+
         scope.launch {
             _state.value = _state.value.copy(loading = true, message = null)
             val stream = withContext(Dispatchers.IO) { streamUrls.resolve(track.bvid, track.cid) }

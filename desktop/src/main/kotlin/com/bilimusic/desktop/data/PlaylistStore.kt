@@ -30,6 +30,8 @@ data class StoredSong(
     val coverUrl: String? = null,
     val durationMs: Long = 0L,
     val sortOrder: Int = 0,
+    /** 非空表示本地文件（bvid 为 "local"），播放时直接交给 VLC */
+    val localPath: String? = null,
 )
 
 @Serializable
@@ -119,6 +121,7 @@ class PlaylistStore(
                 coverUrl = song.coverUrl,
                 durationMs = song.durationMs,
                 sortOrder = order++,
+                localPath = song.localPath,
             )
         }
         if (added.isEmpty()) return 0
@@ -202,4 +205,5 @@ data class NewSong(
     val artist: String = "",
     val coverUrl: String? = null,
     val durationMs: Long = 0L,
+    val localPath: String? = null,
 )

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,6 +56,7 @@ fun PlaylistSidebar(
     onLoadFavFolders: () -> Unit,
     onImportFolder: (Long, String) -> Unit,
     onImportToView: () -> Unit,
+    onOpenLocalMusic: () -> Unit,
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
 ) {
@@ -84,6 +86,12 @@ fun PlaylistSidebar(
                 Icon(Icons.Outlined.Refresh, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("导入「稍后再看」")
+            }
+
+            TextButton(onClick = onOpenLocalMusic, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.FolderOpen, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("本地音乐（扫描电脑）")
             }
 
             progress?.let { p ->
