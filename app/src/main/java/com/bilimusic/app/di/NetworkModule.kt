@@ -1,16 +1,20 @@
 package com.bilimusic.app.di
 
 import com.bilimusic.app.BuildConfig
+import com.bilimusic.app.data.local.prefs.PlaybackPrefs
 import com.bilimusic.app.data.local.prefs.SecurePrefs
+import com.bilimusic.app.data.player.AudioQualityProvider
 import com.bilimusic.app.data.remote.BiliApi
 import com.bilimusic.app.data.remote.BiliCookieJar
 import com.bilimusic.app.data.remote.BiliHeaderInterceptor
 import com.bilimusic.app.data.remote.KeyValueStore
+import com.bilimusic.app.domain.model.AudioQualityOption
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -45,6 +49,14 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideKeyValueStore(securePrefs: SecurePrefs): KeyValueStore = securePrefs
+
+    /**
+     * 共享层的取流逻辑需要知道当前音质档位，安卓端从 DataStore 读。
+     */
+    @Provides
+    @Singleton
+    fun provideAudioQualityProvider(prefs: PlaybackPrefs): AudioQualityProvider =
+        AudioQualityProvider { AudioQualityOption.fromNameOrAuto(prefs.audioQualityOption.first()) }
 
     @Provides
     @Singleton
