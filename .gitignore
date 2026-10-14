@@ -21,3 +21,6 @@ keystore.properties
 
 # 本机验证产物
 _verify/
+
+# 交接文档：只留本机工作区，含本机路径，不进仓库
+HANDOVER.md
