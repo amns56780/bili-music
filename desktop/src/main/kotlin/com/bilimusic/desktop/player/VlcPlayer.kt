@@ -38,11 +38,18 @@ class VlcPlayer {
         "--quiet",
         ":http-referrer=${BiliHeaderInterceptor.REFERER}",
         ":http-user-agent=${BiliHeaderInterceptor.USER_AGENT}",
-        ":network-caching=1000",
+        // Playback starts sooner with a smaller cache; B站音频码率不高，300ms 足够
+        ":network-caching=300",
+        // Explicit low-latency Windows audio output module (falls back automatically)
+        "--aout=mmdevice",
     )
     private val player: EmbeddedMediaPlayer = factory.mediaPlayers().newEmbeddedMediaPlayer()
 
     private var state = State()
+
+    /** Desired volume. VLC resets the audio volume whenever a new media starts, so the 
+    //  value has to be re-applied on play. */
+    private var desiredVolume: Int = 80
     private var finishedCounter = 0L
 
     /** 状态变化回调（在 VLC 的事件线程上调用，UI 侧注意切回主线程） */
@@ -52,10 +59,14 @@ class VlcPlayer {
     var onFinished: () -> Unit = {}
 
     init {
-        player.audio().setVolume(state.volume)
+        player.audio().setVolume(desiredVolume)
         player.events().addMediaPlayerEventListener(
             object : MediaPlayerEventAdapter() {
-                override fun playing(mediaPlayer: MediaPlayer) = publish(playing = true)
+                override fun playing(mediaPlayer: MediaPlayer) {
+                    // VLC resets volume on every new media: re-apply ours.
+                    runCatching { player.audio().setVolume(desiredVolume) }
+                    publish(playing = true)
+                }
                 override fun paused(mediaPlayer: MediaPlayer) = publish(playing = false)
                 override fun stopped(mediaPlayer: MediaPlayer) = publish(playing = false)
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) =
@@ -98,7 +109,13 @@ class VlcPlayer {
      */
     fun play(url: String) {
         state = state.copy(error = null, positionMs = 0L)
-        player.media().play(url)
+        // Volume is passed as a MEDIA option so it is applied the moment playback starts.
+        // VLC resets the audio volume for every new media, so setting it only afterwards
+        // (or only once at startup) always loses the race - this is the reliable fix.
+        // --audio-volume takes a float where 1.0 == 100%.
+        val volumeOption = ":audio-volume=" + String.format(java.util.Locale.US, "%.2f", desiredVolume / 100.0)
+        player.audio().setVolume(desiredVolume)
+        player.media().play(url, volumeOption)
     }
 
     fun pause() {
@@ -128,6 +145,7 @@ class VlcPlayer {
 
     fun setVolume(volume: Int) {
         val clamped = volume.coerceIn(0, 100)
+        desiredVolume = clamped
         player.audio().setVolume(clamped)
         state = state.copy(volume = clamped)
         onStateChanged(state)

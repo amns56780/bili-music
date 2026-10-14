@@ -58,6 +58,8 @@ class PlaybackController(
     private val player: VlcPlayer = VlcPlayer(),
     /** 已下载的本地文件（有则离线播放，不再取流） */
     private val downloadedFile: (bvid: String, cid: Long) -> String? = { _, _ -> null },
+    /** Settings store: remembers the volume (otherwise it resets to 80 on every launch). */
+    private val settings: com.bilimusic.app.data.remote.KeyValueStore? = null,
 ) {
 
     private val _state = MutableStateFlow(PlaybackUiState())
@@ -76,9 +78,15 @@ class PlaybackController(
         const val TAG = "DesktopPlayback"
         /** 进度回写节流：VLC 每秒回调多次，太频繁会让 UI 抖动 */
         const val TICK_MS = 500L
+        /** Volume persistence key. */
+        const val KEY_VOLUME = "desktop.volume"
     }
 
     init {
+        // Restore the saved volume: VLC starts fresh on every launch.
+        runCatching {
+            settings?.getString(KEY_VOLUME)?.toIntOrNull()?.coerceIn(0, 100)?.let { player.setVolume(it) }
+        }
         player.onStateChanged = { s ->
             _state.value = _state.value.copy(
                 playing = s.playing,
@@ -184,7 +192,12 @@ class PlaybackController(
         player.seekTo(positionMs.coerceIn(0L, _state.value.durationMs))
     }
 
-    fun setVolume(volume: Int) = player.setVolume(volume)
+    fun setVolume(volume: Int) {
+        val v = volume.coerceIn(0, 100)
+        player.setVolume(v)
+        // Persist so the next launch keeps this volume (VLC itself does not remember it).
+        runCatching { settings?.putString(KEY_VOLUME, v.toString()) }
+    }
 
     fun cycleMode() {
         val next = when (_state.value.mode) {

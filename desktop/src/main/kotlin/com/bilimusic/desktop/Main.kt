@@ -164,6 +164,7 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
     // VLC 缺失时不要让整个应用崩掉，降级为提示
     val playback = runCatching {
         PlaybackController(
+        settings = storage,
             client = client,
             streamUrls = streamUrls,
             scope = scope,

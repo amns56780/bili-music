@@ -239,14 +239,28 @@ fun PlayerPanel(
                 Spacer(Modifier.width(16.dp))
 
                 Text("音量", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
+                // 宽度必须留出右侧数字的位置：之前 140dp 把数字挤出了卡片右边缘（被裁掉）
+                // 拖动时只更新本地值（视觉即时），松手才真正下发到 VLC：
+                // 每一帧都调 player.audio().setVolume() 会让 JNI 调用积压，声音要过一会才变。
+                var volumeDraft by remember { mutableStateOf(state.volume) }
                 Slider(
-                    value = state.volume.toFloat(),
-                    onValueChange = { controller.setVolume(it.toInt()) },
+                    value = volumeDraft.toFloat(),
+                    onValueChange = { volumeDraft = it.toInt() },
+                    onValueChangeFinished = { controller.setVolume(volumeDraft) },
                     valueRange = 0f..100f,
-                    modifier = Modifier.width(140.dp),
+                    modifier = Modifier.width(88.dp),
                 )
-                Text("${state.volume}", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.width(6.dp))
+                // 固定宽度 + 不换行：避免 0→100 变化时宽度跳动
+                Text(
+                    text = "${volumeDraft}",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.width(30.dp),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Spacer(Modifier.width(4.dp))
             }
         }
     }
