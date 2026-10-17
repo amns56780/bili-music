@@ -130,15 +130,42 @@ class PlaybackController(
     }
 
     /**
-     * 本地文件 → VLC 的 mrl。
+     * 本地文件 → VLC 的 mrl（自己拼，不用 Java 的 URI 工具）。
      *
-     * 不能用 File.toURI()：它在 Java 里生成 "file:/D:/x.flac"（单斜杠），
-     * VLC 会把它当成相对路径拼到工作目录后面（实测 mrl 变成
-     * "file:///C:/.../BiliMusic/desktop/file%3A%2FD%3A%2F..."）。
-     * Path.toUri() 生成标准的 "file:///D:/x.flac"，VLC 才认。
+     * 踩过两个坑：
+     * 1) File.toURI() 生成 "file:/D:/x"（单斜杠），VLC 当相对路径拼到工作目录后面；
+     * 2) 即使改成 Path.toUri()，中文名会被按 JVM 的 sun.jnu.encoding(GBK) 编码成
+     *    "%B0%B2%C4%DD..."，而 VLC 按 UTF-8 解码 → 路径变乱码 → 播放失败。
+     *    表现就是「纯英文文件名的能播、中文名的全是 ERROR」。
+     *
+     * 这里手动按 UTF-8 百分号编码，VLC 解码后就是正确的 Unicode 路径。
      */
-    private fun localMrl(path: String): String =
-        java.io.File(path).toPath().toUri().toString()
+    private fun localMrl(path: String): String {
+        val normalized = java.io.File(path).absolutePath.replace('\\', '/')
+        val segments = normalized.split("/")
+        val encoded = segments.joinToString("/") { seg ->
+            // 盘符段（如 "D:"）原样保留，其余按 UTF-8 百分号编码
+            if (seg.length >= 2 && seg[1] == ':') seg else utf8Encode(seg)
+        }
+        return "file:///" + encoded.trimStart('/')
+    }
+
+    /** RFC 3986 的路径段编码（只保留 unreserved 字符 + 常见安全字符） */
+    private fun utf8Encode(segment: String): String {
+        val bytes = segment.toByteArray(Charsets.UTF_8)
+        val sb = StringBuilder(bytes.size * 3)
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            val keep = (c in 0x30..0x39) || (c in 0x41..0x5A) || (c in 0x61..0x7A) ||
+                c == '-'.code || c == '_'.code || c == '.'.code || c == '~'.code
+            if (keep) {
+                sb.append(c.toChar())
+            } else {
+                sb.append('%').append(String.format(java.util.Locale.ROOT, "%02X", c))
+            }
+        }
+        return sb.toString()
+    }
 
     private fun playCurrent() {
         val track = _state.value.current ?: return
@@ -154,7 +181,7 @@ class PlaybackController(
                 durationMs = track.durationMs,
             )
             scope.launch {
-                withContext(Dispatchers.IO) { player.play(localMrl(path)) }
+                withContext(Dispatchers.IO) { player.playLocalFile(path) }
             }
             return
         }
@@ -167,7 +194,7 @@ class PlaybackController(
                 qualityLabel = "离线",
                 durationMs = track.durationMs,
             )
-            scope.launch { withContext(Dispatchers.IO) { player.play(localMrl(path)) } }
+            scope.launch { withContext(Dispatchers.IO) { player.playLocalFile(path) } }
             return
         }
 

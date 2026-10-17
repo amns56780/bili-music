@@ -51,6 +51,9 @@ compose.desktop {
         providers.gradleProperty("bilimusic.skikoLibraryPath").orNull?.let { lib ->
             jvmArgs += "-Dskiko.library.path=$lib"
         }
+        // ★ VlcJ 通过 JNA 把字符串传给 libvlc，JNA 默认用平台编码（中文系统是 GBK），
+        //   而 libvlc 只认 UTF-8 —— 不设成 UTF-8 的话「中文文件名」的本地音乐全部播不了。
+        jvmArgs += "-Djna.encoding=UTF-8"
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)

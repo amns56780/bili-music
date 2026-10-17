@@ -68,6 +68,12 @@ import com.bilimusic.desktop.ui.rememberRemoteImage
  * 桌面独有的是 UI 与 VLC 播放内核（见 [com.bilimusic.desktop.player.VlcPlayer]）。
  */
 fun main() {
+    // ★ 必须在任何 JNA/VLC 调用之前设置。
+    // VlcJ 通过 JNA 把字符串传给 libvlc，JNA 默认用平台编码（中文系统是 GBK），
+    // 而 libvlc 只认 UTF-8 —— 于是「中文文件名」的本地音乐全部播放失败
+    // （纯英文文件名的却能播，表现极具迷惑性）。
+    // JNA 在 Native 类初始化时读取这个属性，所以必须在创建 VlcPlayer 之前设好。
+    System.setProperty("jna.encoding", "UTF-8")
     // 单实例保护：已有实例在跑时，通知它把窗口显示出来，然后本进程直接退出。
     // 否则会出现多个托盘图标 + 多份播放（Windows 强杀进程还会留下残留图标）。
     if (!SingleInstance.acquire()) return

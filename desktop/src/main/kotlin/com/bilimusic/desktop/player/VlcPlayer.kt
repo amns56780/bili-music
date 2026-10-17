@@ -129,6 +129,28 @@ class VlcPlayer {
     /**
      * 播放一个音频地址（已带过期时间，过期后由上层重新取流再调用）。
      */
+    /**
+     * 播放本地文件。
+     *
+     * 关键：不能用 media().play(String) —— 那个走 libvlc_media_new_location，
+     * 按 URL 解析，中文路径会被折腾成乱码（实测 "Candy_Wind - 青空.flac" 直接 ERROR）。
+     * PathResource 走 libvlc_media_new_path，VLC 直接用宽字符路径打开文件，
+     * 中文/空格/括号都不需要转义。
+     */
+    fun playLocalFile(path: String) {
+        state = state.copy(error = null, positionMs = 0L)
+        runCatching {
+            // VLC 的 mrl 解析器对「没有协议前缀的绝对路径」按本地文件打开，
+            // 和命令行 vlc "D:\music\x.flac" 一样。这比 file:/// URI 可靠得多：
+            // 不需要我们把中文路径做百分号编码（之前按 UTF-8 编码后 VLC 仍读错）。
+            player.media().play(path, ":audio-volume=1.00")
+        }.onFailure {
+            println("[Vlc] 本地文件播放失败: " + it)
+            state = state.copy(error = "本地文件打不开：" + it.message)
+            onStateChanged(state)
+        }
+    }
+
     fun play(url: String) {
         state = state.copy(error = null, positionMs = 0L)
         // Volume is passed as a MEDIA option so it is applied the moment playback starts.
