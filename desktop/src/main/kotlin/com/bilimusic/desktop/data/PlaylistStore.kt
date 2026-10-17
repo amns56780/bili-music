@@ -68,6 +68,40 @@ class PlaylistStore(
     private val _songs = MutableStateFlow(db.songs)
     val songs: StateFlow<List<StoredSong>> = _songs.asStateFlow()
 
+    init {
+        // 注意：必须放在 _songs 初始化之后 —— Kotlin 的 init 块按声明顺序执行
+        migrateLocalTitlesOnce()
+    }
+
+    /**
+     * 一次性迁移：历史版本扫描本地音乐时用 nameWithoutExtension 取标题，
+     * 遇到「xxx.kgm.flac」这种多层后缀会留下 ".kgm"。这里在启动时把已入库的
+     * 本地歌曲标题重新算一遍（只改本地曲目，在线曲目不动）。
+     */
+    private fun migrateLocalTitlesOnce() = synchronized(lock) {
+        var changed = false
+        val fixed = db.songs.map { song ->
+            val path = song.localPath
+            if (path.isNullOrBlank()) {
+                song
+            } else {
+                val newTitle = LocalMusicScanner.titleOf(java.io.File(path).name)
+                if (newTitle.isNotBlank() && newTitle != song.title) {
+                    changed = true
+                    song.copy(title = newTitle)
+                } else {
+                    song
+                }
+            }
+        }
+        if (changed) {
+            db = db.copy(songs = fixed)
+            _songs.value = db.songs
+            persistLocked()
+            com.bilimusic.app.util.AppLog.i("PlaylistStore", "已修正本地音乐标题（去掉伪扩展名）")
+        }
+    }
+
     fun songsOf(playlistId: Long): List<StoredSong> =
         db.songs.filter { it.playlistId == playlistId }.sortedBy { it.sortOrder }
 

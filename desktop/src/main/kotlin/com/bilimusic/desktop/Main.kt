@@ -447,6 +447,8 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                         artist = song.artist.ifBlank { "未知UP主" },
                                         coverUrl = song.coverUrl,
                                         durationMs = song.durationMs,
+                                        // ★ 必须带上本地路径：否则歌单里的本地曲目会被当成在线曲目去 B 站取流
+                                        localPath = song.localPath,
                                     )
                                 }
                                 playback.playQueue(tracks, index)

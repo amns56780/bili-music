@@ -129,6 +129,17 @@ class PlaybackController(
         playCurrent()
     }
 
+    /**
+     * 本地文件 → VLC 的 mrl。
+     *
+     * 不能用 File.toURI()：它在 Java 里生成 "file:/D:/x.flac"（单斜杠），
+     * VLC 会把它当成相对路径拼到工作目录后面（实测 mrl 变成
+     * "file:///C:/.../BiliMusic/desktop/file%3A%2FD%3A%2F..."）。
+     * Path.toUri() 生成标准的 "file:///D:/x.flac"，VLC 才认。
+     */
+    private fun localMrl(path: String): String =
+        java.io.File(path).toPath().toUri().toString()
+
     private fun playCurrent() {
         val track = _state.value.current ?: return
         currentKey = track.bvid to track.cid
@@ -142,7 +153,9 @@ class PlaybackController(
                 qualityLabel = "本地",
                 durationMs = track.durationMs,
             )
-            scope.launch { withContext(Dispatchers.IO) { player.play(java.io.File(path).toURI().toString()) } }
+            scope.launch {
+                withContext(Dispatchers.IO) { player.play(localMrl(path)) }
+            }
             return
         }
 
@@ -154,7 +167,7 @@ class PlaybackController(
                 qualityLabel = "离线",
                 durationMs = track.durationMs,
             )
-            scope.launch { withContext(Dispatchers.IO) { player.play(java.io.File(path).toURI().toString()) } }
+            scope.launch { withContext(Dispatchers.IO) { player.play(localMrl(path)) } }
             return
         }
 

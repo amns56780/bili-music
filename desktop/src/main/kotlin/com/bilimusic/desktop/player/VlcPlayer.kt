@@ -138,7 +138,7 @@ class VlcPlayer {
         // VLC 自身音量固定满幅（增益 1.0），音量完全交给 Windows 会话控制，
         // 避免 VLC 的立方曲线和会话音量叠成两层。
         player.media().play(
-            url,
+            normalizeLocalMrl(url),
             ":audio-volume=1.00",
             ":http-referrer=" + BiliHeaderInterceptor.REFERER,
             ":http-user-agent=" + BiliHeaderInterceptor.USER_AGENT,
@@ -184,6 +184,16 @@ class VlcPlayer {
         applySessionVolume()
         state = state.copy(volume = Math.round(sessionVolume * 100).toInt())
         onStateChanged(state)
+    }
+
+    /**
+     * Java 的 File.toURI() 生成 "file:/D:/x"，VLC 会当相对路径处理。
+     * 这里统一规范成 "file:///D:/x"（对 http 地址原样返回）。
+     */
+    private fun normalizeLocalMrl(url: String): String = when {
+        url.startsWith("file:///") -> url
+        url.startsWith("file:/") -> "file:///" + url.removePrefix("file:/")
+        else -> url
     }
 
     private fun applySessionVolume() {
