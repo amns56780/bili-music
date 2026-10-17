@@ -87,7 +87,7 @@ class PlaybackController(
         runCatching {
             settings?.getString(KEY_VOLUME)?.toIntOrNull()?.coerceIn(0, 100)?.let { ui ->
                 _state.value = _state.value.copy(volume = ui)
-                player.setSessionVolume(ui / 100f)
+                player.setSessionVolume(uiToSessionVolume(ui))
             }
         }
         player.onStateChanged = { s ->
@@ -205,12 +205,27 @@ class PlaybackController(
     fun setVolume(volume: Int, persist: Boolean = true) {
         val ui = volume.coerceIn(0, 100)
         _state.value = _state.value.copy(volume = ui)
-        player.setSessionVolume(ui / 100f)
+        player.setSessionVolume(uiToSessionVolume(ui))
         if (persist) {
             runCatching { settings?.putString(KEY_VOLUME, ui.toString()) }
         }
     }
 
+
+    /**
+     * UI 音量（0-100）→ Windows 会话音量（0..1）。
+     *
+     * 20% 以上线性映射，保证音量合成器里显示的值和软件里的一致；
+     * 20% 以下用 1.5 次方压低 —— 因为 Windows 会话音量的 1% 仍然有 -40dB 左右，
+     * 晚上安静环境听还是觉得响。这里让 1% 落到约 0.22%（≈ 再小 4~5 倍），
+     * 20% 处和线性段平滑衔接。
+     */
+    private fun uiToSessionVolume(ui: Int): Float {
+        if (ui <= 0) return 0f
+        if (ui >= 100) return 1f
+        if (ui >= 20) return ui / 100f
+        return (0.2 * Math.pow(ui / 20.0, 1.5)).toFloat()
+    }
 
     fun cycleMode() {
         val next = when (_state.value.mode) {
