@@ -13,4 +13,8 @@ internal val mouseKeys: MouseKeyApi = Native.load("user32", MouseKeyApi::class.j
 internal fun isLeftMouseButtonDown(): Boolean =
     (mouseKeys.GetAsyncKeyState(VK_LBUTTON).toInt() and 0x8000) != 0
 
+internal fun isRightMouseButtonDown(): Boolean =
+    (mouseKeys.GetAsyncKeyState(VK_RBUTTON).toInt() and 0x8000) != 0
+
 private const val VK_LBUTTON = 0x01
+private const val VK_RBUTTON = 0x02

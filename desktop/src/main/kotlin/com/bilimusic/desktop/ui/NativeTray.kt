@@ -47,6 +47,7 @@ class NativeTray(
 
     private var trayIcon: TrayIcon? = null
     private var menuWindow: JWindow? = null
+    private var dismissTimer: javax.swing.Timer? = null
 
     private val menuFont: Font = run {
         val families = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames
@@ -178,9 +179,37 @@ class NativeTray(
         window.toFront()
         window.requestFocus()
         menuWindow = window
+        startDismissWatcher(window)
+    }
+
+    /**
+     * JWindow 在 Windows 上拿不到真正焦点，"失去焦点自动关闭"不会触发，
+     * 所以自己每 60ms 看一眼：鼠标在菜单外按下就关掉（跟系统菜单行为一致）。
+     */
+    private fun startDismissWatcher(window: JWindow) {
+        dismissTimer?.stop()
+        dismissTimer = javax.swing.Timer(60) {
+            val active = menuWindow
+            if (active == null) {
+                dismissTimer?.stop()
+            } else {
+                val point = MouseInfo.getPointerInfo()?.location
+                if (point != null) {
+                    val inside = active.bounds.contains(point)
+                    if (!inside && (isLeftMouseButtonDown() || isRightMouseButtonDown())) {
+                        hideMenu()
+                    }
+                }
+            }
+        }.apply {
+            isRepeats = true
+            start()
+        }
     }
 
     private fun hideMenu() {
+        dismissTimer?.stop()
+        dismissTimer = null
         val window = menuWindow ?: return
         menuWindow = null
         runCatching { window.dispose() }
