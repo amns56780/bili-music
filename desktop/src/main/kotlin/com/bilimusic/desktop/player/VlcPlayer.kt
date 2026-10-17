@@ -50,9 +50,14 @@ class VlcPlayer {
 
     private var state = State()
 
-    /** Desired volume. VLC resets the audio volume whenever a new media starts, so the 
-    //  value has to be re-applied on play. */
-    private var desiredVolume: Int = 80
+    /**
+     * 目标音量（0..1），直接写 Windows 音频会话音量。
+     *
+     * 不再用 VLC 自己的音量：VLC 每次开始播放都会把会话音量重置成它自己的 gain，
+     * 所以这里记住目标值，在 playing 回调里重新应用一次。
+     */
+    @Volatile
+    private var sessionVolume: Float = 0.8f
     private var finishedCounter = 0L
 
     /** 状态变化回调（在 VLC 的事件线程上调用，UI 侧注意切回主线程） */
@@ -62,12 +67,20 @@ class VlcPlayer {
     var onFinished: () -> Unit = {}
 
     init {
-        player.audio().setVolume(desiredVolume)
         player.events().addMediaPlayerEventListener(
             object : MediaPlayerEventAdapter() {
                 override fun playing(mediaPlayer: MediaPlayer) {
-                    // VLC resets volume on every new media: re-apply ours.
-                    runCatching { player.audio().setVolume(desiredVolume) }
+                    // VLC 每开始播放新媒体都会把会话音量重置成它自己的 gain（1.0），
+                    // 所以这里把目标音量重新写回 Windows 会话一次。
+                    applySessionVolume()
+                    // 音频会话要等 VLC 真正开始输出才注册（启动时枚举不到自己），
+                    // 延迟再补一次，确保接管成功。
+                    Thread {
+                        runCatching {
+                            Thread.sleep(700)
+                            applySessionVolume()
+                        }
+                    }.apply { isDaemon = true }.start()
                     publish(playing = true)
                 }
                 override fun paused(mediaPlayer: MediaPlayer) = publish(playing = false)
@@ -122,14 +135,13 @@ class VlcPlayer {
         // VLC resets the audio volume for every new media, so setting it only afterwards
         // (or only once at startup) always loses the race - this is the reliable fix.
         // --audio-volume takes a float where 1.0 == 100%.
-        val volumeOption = ":audio-volume=" + String.format(java.util.Locale.US, "%.2f", desiredVolume / 100.0)
-        player.audio().setVolume(desiredVolume)
-        // 双保险：媒体级选项一定对该次播放生效（全局选项万一被某个 VLC 版本忽略还有这层）
+        // VLC 自身音量固定满幅（增益 1.0），音量完全交给 Windows 会话控制，
+        // 避免 VLC 的立方曲线和会话音量叠成两层。
         player.media().play(
             url,
+            ":audio-volume=1.00",
             ":http-referrer=" + BiliHeaderInterceptor.REFERER,
             ":http-user-agent=" + BiliHeaderInterceptor.USER_AGENT,
-            volumeOption,
         )
     }
 
@@ -158,12 +170,30 @@ class VlcPlayer {
         publish(positionMs = positionMs)
     }
 
-    fun setVolume(volume: Int) {
-        val clamped = volume.coerceIn(0, 100)
-        desiredVolume = clamped
-        player.audio().setVolume(clamped)
-        state = state.copy(volume = clamped)
+    /**
+     * 设置音量（0..1），直接写本进程的 Windows 音频会话音量。
+     *
+     * 走 WASAPI 的好处：即时生效（不用等 VLC 的异步命令队列）、精度 0.1%、
+     * 音量合成器里显示的就是这个值。
+     *
+     * 拿不到会话时（极少见）回退到 VLC 自己的音量：VLC 是立方曲线，
+     * 所以要用 cbrt 反推，保证会话里显示的值仍然对得上。
+     */
+    fun setSessionVolume(volume: Float) {
+        sessionVolume = volume.coerceIn(0f, 1f)
+        applySessionVolume()
+        state = state.copy(volume = Math.round(sessionVolume * 100).toInt())
         onStateChanged(state)
+    }
+
+    private fun applySessionVolume() {
+        if (WindowsAudioSession.setVolume(sessionVolume)) return
+        // 会话失效（例如音频输出重建）→ 重新枚举一次再试
+        WindowsAudioSession.invalidate()
+        if (WindowsAudioSession.setVolume(sessionVolume)) return
+        // 最终回退：用 VLC 自己的音量（立方曲线 → 反推）
+        val vlcVolume = Math.round(100.0 * Math.cbrt(sessionVolume.toDouble())).toInt().coerceIn(0, 100)
+        runCatching { player.audio().setVolume(vlcVolume) }
     }
 
     fun snapshot(): State = state

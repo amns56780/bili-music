@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -224,8 +225,28 @@ fun PlayerBar(
         }
 
         // ---------------- 右：音量 / 定时 / 队列 ----------------
+        var wheelVolume by remember { mutableStateOf(state.volume) }
+        LaunchedEffect(state.volume) { wheelVolume = state.volume }
         Row(
-            modifier = Modifier.width(260.dp),
+            modifier = Modifier
+                .width(280.dp)
+                // 滚轮调音量：在音量图标/滑条/数字这一片区域滚动即可，步进 1%
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
+                                val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                                if (delta != 0f) {
+                                    val step = if (delta > 0f) -1 else 1
+                                    wheelVolume = (wheelVolume + step).coerceIn(0, 100)
+                                    controller.setVolume(wheelVolume, persist = true)
+                                    event.changes.forEach { it.consume() }
+                                }
+                            }
+                        }
+                    }
+                },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.End,
         ) {
@@ -259,14 +280,14 @@ fun PlayerBar(
                     controller.setVolume(volumeDraft, persist = true)
                     volumeDragging = false
                 },
-                modifier = Modifier.width(76.dp),
+                modifier = Modifier.width(110.dp),
                 hoverBarColor = BmColors.text2,
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = volumeDraft.toString(),
+                text = if (volumeDraft == 0) "静音" else volumeDraft.toString() + "%",
                 style = BmType.number,
-                modifier = Modifier.width(24.dp),
+                modifier = Modifier.width(34.dp),
                 textAlign = TextAlign.End,
             )
             Spacer(Modifier.width(10.dp))
