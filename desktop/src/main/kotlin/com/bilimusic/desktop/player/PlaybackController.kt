@@ -84,15 +84,20 @@ class PlaybackController(
 
     init {
         // Restore the saved volume: VLC starts fresh on every launch.
+        // 存的是 UI 音量（0-100），下发给 VLC 时要反推（见 toVlcVolume 的说明）。
         runCatching {
-            settings?.getString(KEY_VOLUME)?.toIntOrNull()?.coerceIn(0, 100)?.let { player.setVolume(it) }
+            settings?.getString(KEY_VOLUME)?.toIntOrNull()?.coerceIn(0, 100)?.let { ui ->
+                _state.value = _state.value.copy(volume = ui)
+                player.setVolume(toVlcVolume(ui))
+            }
         }
         player.onStateChanged = { s ->
             _state.value = _state.value.copy(
                 playing = s.playing,
                 positionMs = s.positionMs,
                 durationMs = if (s.durationMs > 0) s.durationMs else _state.value.durationMs,
-                volume = s.volume,
+                // volume 保持 UI 侧的值：VLC 回传的是它自己的音量刻度（0-100 非线性），
+                // 换算回来会有舍入抖动，所以这里不用它覆盖。
                 message = s.error ?: _state.value.message,
             )
         }
@@ -192,11 +197,37 @@ class PlaybackController(
         player.seekTo(positionMs.coerceIn(0L, _state.value.durationMs))
     }
 
-    fun setVolume(volume: Int) {
-        val v = volume.coerceIn(0, 100)
-        player.setVolume(v)
-        // Persist so the next launch keeps this volume (VLC itself does not remember it).
-        runCatching { settings?.putString(KEY_VOLUME, v.toString()) }
+    /**
+     * 设置音量。[volume] 是 UI 上的 0-100（也就是期望的系统音量合成器里显示的值）。
+     *
+     * [persist] 为 false 时只下发不写盘 —— 拖动过程中每 50ms 调一次，
+     * 避免每帧写 settings.json。
+     */
+    fun setVolume(volume: Int, persist: Boolean = true) {
+        val ui = volume.coerceIn(0, 100)
+        _state.value = _state.value.copy(volume = ui)
+        player.setVolume(toVlcVolume(ui))
+        if (persist) {
+            // Persist so the next launch keeps this volume (VLC itself does not remember it).
+            runCatching { settings?.putString(KEY_VOLUME, ui.toString()) }
+        }
+    }
+
+    /**
+     * UI 音量 → VLC 音量刻度。
+     *
+     * VLC 的软件增益是「立方」的（gain = volume³），而它又把 gain 同步给 Windows
+     * 的音频会话音量（音量合成器里看到的那个）。所以直接把 UI 值塞给 VLC 会得到
+     * 「UI 50 → 合成器 12.5%」的错位（实测如此，只有 100% 时两者才一致）。
+     *
+     * 这里反向解：想让合成器显示 ui%，就让 VLC 音量 = cbrt(ui/100) × 100。
+     *   UI 80 → VLC 93 → gain 0.80 ✓
+     *   UI 50 → VLC 79 → gain 0.49 ✓
+     */
+    private fun toVlcVolume(ui: Int): Int {
+        if (ui <= 0) return 0
+        if (ui >= 100) return 100
+        return Math.round(100.0 * Math.cbrt(ui / 100.0)).toInt().coerceIn(1, 100)
     }
 
     fun cycleMode() {

@@ -231,6 +231,7 @@ fun PlayerBar(
         ) {
             var volumeDragging by remember { mutableStateOf(false) }
             var volumeDraft by remember { mutableStateOf(state.volume) }
+            var lastVolumeSentAt by remember { mutableStateOf(0L) }
             LaunchedEffect(state.volume, volumeDragging) {
                 if (!volumeDragging) volumeDraft = state.volume
             }
@@ -246,9 +247,16 @@ fun PlayerBar(
                 onChange = {
                     volumeDragging = true
                     volumeDraft = (it * 100).roundToInt()
+                    // 拖动过程中节流下发（每 50ms 一次）：VLC 的音量命令是异步的，
+                    // 只在松手时下发会有明显延迟感。这里实时下发但不写盘，松手再持久化。
+                    val now = System.currentTimeMillis()
+                    if (now - lastVolumeSentAt >= 50) {
+                        lastVolumeSentAt = now
+                        controller.setVolume(volumeDraft, persist = false)
+                    }
                 },
                 onFinished = {
-                    controller.setVolume(volumeDraft)
+                    controller.setVolume(volumeDraft, persist = true)
                     volumeDragging = false
                 },
                 modifier = Modifier.width(76.dp),
