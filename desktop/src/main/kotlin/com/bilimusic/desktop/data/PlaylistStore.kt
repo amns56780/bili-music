@@ -17,6 +17,10 @@ data class StoredPlaylist(
     /** 对应 [PlaylistSourceType] 的名字（FAV / TO_VIEW / SPACE / SEASON / LOCAL / MANUAL） */
     val sourceType: String = PlaylistSourceType.MANUAL.name,
     val createdAt: Long = System.currentTimeMillis(),
+    /** 自定义封面（网络图，通常取自歌单内某首视频的封面） */
+    val coverUrl: String? = null,
+    /** 自定义封面（本地图片）；与 [coverUrl] 二选一，本地优先 */
+    val coverPath: String? = null,
 )
 
 @Serializable
@@ -88,6 +92,15 @@ class PlaylistStore(
     /** 按来源找已存在的歌单（重复导入时复用，而不是建一堆同名歌单） */
     fun findBySource(sourceType: PlaylistSourceType, title: String): StoredPlaylist? =
         db.playlists.firstOrNull { it.sourceType == sourceType.name && it.title == title }
+
+    /** 设置/清除歌单封面（传 null 表示恢复默认的渐变占位） */
+    fun setPlaylistCover(id: Long, coverUrl: String? = null, coverPath: String? = null) = mutate { data ->
+        data.copy(
+            playlists = data.playlists.map {
+                if (it.id == id) it.copy(coverUrl = coverUrl, coverPath = coverPath) else it
+            },
+        )
+    }
 
     fun renamePlaylist(id: Long, title: String) = mutate {
         it.copy(playlists = it.playlists.map { p -> if (p.id == id) p.copy(title = title) else p })

@@ -36,5 +36,14 @@ fun applyWindowsDarkTitleBar(window: Window, title: String) {
         if (dwmApi.DwmSetWindowAttribute(hwnd, 20, on.pointer, 4) != 0) {
             dwmApi.DwmSetWindowAttribute(hwnd, 19, on.pointer, 4)
         }
+        // Win11：系统开着「在标题栏上显示主题色」时，immersive dark 会被强调色覆盖
+        // （实测标题栏还是蓝的）。这里直接把 caption(35) / captionText(36) / border(34)
+        // 设成深色，颜色格式是 0x00BBGGRR，不是 RGB。
+        val captionColor = IntByReference(0x000E0C0C) // #0C0C0E
+        dwmApi.DwmSetWindowAttribute(hwnd, 35, captionColor.pointer, 4)
+        val captionText = IntByReference(0x00F2F2F2) // #F2F2F2
+        dwmApi.DwmSetWindowAttribute(hwnd, 36, captionText.pointer, 4)
+        val borderColor = IntByReference(0x000E0C0C)
+        dwmApi.DwmSetWindowAttribute(hwnd, 34, borderColor.pointer, 4)
     }
 }

@@ -11,7 +11,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,8 +54,10 @@ import com.bilimusic.desktop.player.GlobalHotkeys
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.SleepTimer
 import com.bilimusic.desktop.player.Track
+import com.bilimusic.desktop.ui.AppTitleBar
 import com.bilimusic.desktop.ui.HomeScreen
 import com.bilimusic.desktop.ui.LoginScreen
+import com.bilimusic.desktop.ui.theme.BmTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import com.bilimusic.desktop.ui.AppTitleBar
 import com.bilimusic.desktop.ui.rememberRemoteImage
@@ -85,6 +86,8 @@ fun main() = application {
         title = "bilimusic",
         icon = appIcon,
         visible = windowVisible,
+        // 无边框窗口：标题栏自己画（见 AppTitleBar），拖动由事件位移搬窗口
+        undecorated = true,
         onKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown) {
                 when (event.key) {
@@ -105,10 +108,71 @@ fun main() = application {
             }
         },
     ) {
-        // 保留系统标题栏：拖动交给 DWM 处理才够顺滑（这也是 DeepSeek Harness 的做法）。
-        // 这里只把标题栏改成深色，让它跟应用的深色界面协调，不再自己画标题栏。
-        com.bilimusic.desktop.ui.applyWindowsDarkTitleBar(window, "bilimusic")
-        BiliMusicDesktopApp(app)
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            window.minimumSize = java.awt.Dimension(1000, 640)
+            // 无边框窗口最大化时会盖住任务栏，用 maximizedBounds 收住
+            runCatching {
+                val toolkit = java.awt.Toolkit.getDefaultToolkit()
+                val device = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice
+                val insets = toolkit.getScreenInsets(device.defaultConfiguration)
+                val size = toolkit.screenSize
+                window.maximizedBounds = java.awt.Rectangle(
+                    insets.left,
+                    insets.top,
+                    size.width - insets.left - insets.right,
+                    size.height - insets.top - insets.bottom,
+                )
+            }
+            // 等 AWT peer 真正创建出 HWND 再接管拖动
+            kotlinx.coroutines.delay(400)
+            // 拿到窗口句柄：之后拖动标题栏直接用 Win32 SetWindowPos 在独立线程移动窗口，
+            // 不经过 AWT setLocation，也不占 Compose 的 UI 线程
+            val attached = com.bilimusic.desktop.ui.NativeWindowMover.attach("bilimusic")
+            println("[BmChrome] native mover attached=" + attached)
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            var isMaximized by remember { mutableStateOf(false) }
+            var normalBounds by remember { mutableStateOf<java.awt.Rectangle?>(null) }
+            AppTitleBar(
+                window = window,
+                title = "bilimusic",
+                icon = appIcon,
+                maximized = isMaximized,
+                onMinimize = {
+                    // undecorated 窗口下 windowState.isMinimized 不一定生效，直接走 AWT
+                    window.isMinimized = true
+                },
+                onToggleMaximize = {
+                    // 无边框窗口上 extendedState/placement 都可能被忽略，直接算工作区并设 bounds 最可靠
+                    if (!isMaximized) {
+                        normalBounds = window.bounds
+                        runCatching {
+                            val toolkit = java.awt.Toolkit.getDefaultToolkit()
+                            val device = java.awt.GraphicsEnvironment
+                                .getLocalGraphicsEnvironment().defaultScreenDevice
+                            val insets = toolkit.getScreenInsets(device.defaultConfiguration)
+                            val size = toolkit.screenSize
+                            window.bounds = java.awt.Rectangle(
+                                insets.left,
+                                insets.top,
+                                size.width - insets.left - insets.right,
+                                size.height - insets.top - insets.bottom,
+                            )
+                        }
+                        isMaximized = true
+                    } else {
+                        normalBounds?.let { window.bounds = it }
+                        isMaximized = false
+                    }
+                },
+                onClose = { windowVisible = false },
+            )
+            Box(modifier = Modifier.weight(1f)) {
+                BiliMusicDesktopApp(app)
+            }
+        }
+        }
     }
 
     // 托盘改用原生 AWT 实现：Compose 自带 Tray 的右键菜单是原生菜单，
@@ -263,7 +327,7 @@ private class DesktopApp(
 private fun BiliMusicDesktopApp(app: DesktopApp) {
     LaunchedEffect(app) { app.auth.bootstrap() }
 
-    MaterialTheme(colorScheme = darkColorScheme()) {
+    DesktopTheme(app.client.okHttpClient) {
         Surface(modifier = Modifier.fillMaxSize()) {
             val authState by app.auth.state.collectAsState()
             // 本地优先：不强制登录。默认直接进主界面（本地音乐随便听），
@@ -302,7 +366,22 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                         val playlists by app.store.playlists.collectAsState()
                         val allSongs by app.store.songs.collectAsState()
                         val importProgress by app.importer.progress.collectAsState()
-                        var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
+                        // 记住上次看的是哪个歌单；首次启动/记录失效则落在第一个歌单上
+                        var selectedPlaylistId by remember {
+                            mutableStateOf(
+                                app.storage.getString(KEY_SELECTED_PLAYLIST)?.toLongOrNull(),
+                            )
+                        }
+                        androidx.compose.runtime.LaunchedEffect(playlists) {
+                            if (playlists.isNotEmpty() && playlists.none { it.id == selectedPlaylistId }) {
+                                selectedPlaylistId = playlists.first().id
+                            }
+                        }
+                        androidx.compose.runtime.LaunchedEffect(selectedPlaylistId) {
+                            selectedPlaylistId?.let {
+                                app.storage.putString(KEY_SELECTED_PLAYLIST, it.toString())
+                            }
+                        }
                         var favFolders by remember { mutableStateOf<List<FavFolderDto>>(emptyList()) }
                         var showLocalMusic by remember { mutableStateOf(false) }
                         val localMusicState by app.localMusic.state.collectAsState()
@@ -320,8 +399,8 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                             cover = cover,
                             controller = playback,
                             playlists = playlists,
-                            selectedPlaylistId = selectedPlaylistId,
-                            selectedPlaylistTitle = selected?.title.orEmpty(),
+                            selectedPlaylist = selected,
+                            songCounts = allSongs.groupingBy { it.playlistId }.eachCount(),
                             songs = songs,
                             importProgress = importProgress.takeIf { it.running || it.text.isNotBlank() || it.error != null },
                             favFolders = favFolders,
@@ -459,11 +538,62 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 }
                             },
                             onRequestLogin = { showLogin = true },
+                            onRenamePlaylist = { id, title ->
+                                app.store.renamePlaylist(id, title)
+                                playback.reportError("歌单已重命名")
+                            },
+                            onDeletePlaylist = { id ->
+                                app.store.deletePlaylist(id)
+                                playback.reportError("歌单已删除（已下载的音频文件保留）")
+                            },
+                            onSetCoverUrl = { id, url ->
+                                app.store.setPlaylistCover(id, coverUrl = url)
+                                playback.reportError(if (url == null) "已恢复默认封面" else "封面已更新")
+                            },
+                            onSetCoverFile = { playlistId ->
+                                val chooser = javax.swing.JFileChooser().apply {
+                                    dialogTitle = "选择封面图片"
+                                    fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+                                        "图片 (*.png;*.jpg;*.jpeg;*.webp;*.gif)",
+                                        "png", "jpg", "jpeg", "webp", "gif",
+                                    )
+                                }
+                                if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                    val src = chooser.selectedFile
+                                    runCatching {
+                                        val dir = java.io.File(
+                                            System.getProperty("user.home"),
+                                            ".bilimusic/covers",
+                                        ).apply { mkdirs() }
+                                        val ext = src.extension.ifBlank { "png" }.lowercase()
+                                        val dst = java.io.File(dir, "playlist-" + playlistId + "." + ext)
+                                        java.nio.file.Files.copy(
+                                            src.toPath(),
+                                            dst.toPath(),
+                                            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                        )
+                                        app.store.setPlaylistCover(playlistId, coverPath = dst.absolutePath)
+                                        playback.reportError("封面已更新")
+                                    }.onFailure {
+                                        playback.reportError("设置封面失败：" + (it.message ?: "未知错误"))
+                                    }
+                                }
+                            },
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/** 主题 + 全局图片加载上下文（封面图需要带 Referer 的 OkHttpClient） */
+@Composable
+private fun DesktopTheme(client: okhttp3.OkHttpClient, content: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.bilimusic.desktop.ui.LocalImageClient provides client,
+    ) {
+        BmTheme(content = content)
     }
 }
 
@@ -488,3 +618,4 @@ private fun VlcMissingHint() {
 }
 
 private const val KEY_AUDIO_QUALITY = "audio_quality"
+private const val KEY_SELECTED_PLAYLIST = "desktop.selectedPlaylist"

@@ -1,36 +1,28 @@
 package com.bilimusic.desktop.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Login
-import androidx.compose.material.icons.outlined.Logout
-import androidx.compose.material.icons.outlined.PlayCircle
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.desktop.auth.AuthUiState
@@ -42,10 +34,20 @@ import com.bilimusic.desktop.data.StoredSong
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.PlaybackUiState
 import com.bilimusic.desktop.player.SleepTimerUiState
+import com.bilimusic.desktop.ui.theme.BmColors
+import com.bilimusic.desktop.ui.theme.BmDimens
+import com.bilimusic.desktop.ui.theme.BmType
 
 /**
- * 登录后的主界面：
- * 顶部账号栏 + 「粘贴 BV/链接直接播放」+ 左侧歌单栏 + 歌单详情 + 播放器面板 + 播放队列。
+ * 主界面骨架（对齐网易云 PC 版歌单页）：
+ *
+ *   ┌──────────┬──────────────────────────┐
+ *   │ 歌单栏    │ 歌单详情（header + 曲目表） │
+ *   ├──────────┴──────────────────────────┤
+ *   │ 底部通栏播放条                        │
+ *   └─────────────────────────────────────┘
+ *
+ * 顶栏的账号 / 链接输入都收进了侧栏，主区只服务「当前歌单」这一件事。
  */
 @Composable
 fun HomeScreen(
@@ -54,8 +56,8 @@ fun HomeScreen(
     cover: ImageBitmap?,
     controller: PlaybackController,
     playlists: List<StoredPlaylist>,
-    selectedPlaylistId: Long?,
-    selectedPlaylistTitle: String,
+    songCounts: Map<Long, Int>,
+    selectedPlaylist: StoredPlaylist?,
     songs: List<StoredSong>,
     importProgress: ImportProgress?,
     favFolders: List<FavFolderDto>,
@@ -91,154 +93,136 @@ fun HomeScreen(
     onImportSeason: (String) -> Unit,
     onImportSpace: (String) -> Unit,
     onRequestLogin: () -> Unit,
+    onRenamePlaylist: (Long, String) -> Unit,
+    onDeletePlaylist: (Long) -> Unit,
+    onSetCoverUrl: (Long, String?) -> Unit,
+    onSetCoverFile: (Long) -> Unit,
 ) {
-    var input by remember { mutableStateOf("") }
-
-    Column(modifier = Modifier.fillMaxSize().padding(18.dp)) {
-        // 顶部账号栏
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("bilimusic", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.width(16.dp))
-            if (auth.account != null) {
-                Text(
-                    text = "${auth.account.name} · ${auth.account.uidText}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onLogout) {
-                    Icon(Icons.Outlined.Logout, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("退出登录")
-                }
-            } else {
-                // 不强制登录：本地播放随时可用，要网络歌单再登录
-                Text(
-                    text = "未登录 · 本地播放可用",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                Button(onClick = onRequestLogin) {
-                    Icon(Icons.Outlined.Login, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("登录 B 站账号")
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // 直接播放入口
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                singleLine = true,
-                placeholder = { Text("粘贴 BV 号 / av 号 / 视频链接 / b23.tv 短链") },
-                modifier = Modifier.weight(1f),
+    androidx.compose.runtime.LaunchedEffect(selectedPlaylist?.id, playlists.size) {
+        println("[BmDebug] selectedPlaylist=" + selectedPlaylist?.id + " playlists=" + playlists.size + " songs=" + songs.size)
+    }
+    Column(modifier = Modifier.fillMaxSize().background(BmColors.bg)) {
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Sidebar(
+                auth = auth,
+                playlists = playlists,
+                songCounts = songCounts,
+                selectedId = selectedPlaylist?.id,
+                progress = importProgress,
+                favFolders = favFolders,
+                onSelect = onSelectPlaylist,
+                onCreate = onCreatePlaylist,
+                onRequestLogin = onRequestLogin,
+                onLogout = onLogout,
+                onOpenLocalMusic = onOpenLocalMusic,
+                onLoadFavFolders = onLoadFavFolders,
+                onImportFolder = onImportFolder,
+                onImportToView = onImportToView,
+                onImportSeason = onImportSeason,
+                onImportSpace = onImportSpace,
+                onDismissFavPicker = onDismissFavPicker,
+                onConsumeProgressError = onConsumeProgressError,
+                onOpenInput = onOpenInput,
             )
-            Spacer(Modifier.width(12.dp))
-            Button(onClick = { onOpenInput(input) }, enabled = input.isNotBlank()) {
-                Icon(Icons.Outlined.PlayCircle, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("播放")
-            }
-        }
 
-        (playback.message ?: extraMessage)?.let { message ->
-            Spacer(Modifier.height(10.dp))
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(message, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = controller::consumeMessage) { Text("知道了") }
-                }
-            }
-        }
+            // 侧栏与主区的分界线
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(BmColors.divider),
+            )
 
-        Spacer(Modifier.height(14.dp))
-
-        Row(modifier = Modifier.fillMaxSize()) {
-            // 左侧：歌单栏
-            Box(modifier = Modifier.width(280.dp)) {
-                PlaylistSidebar(
-                    playlists = playlists,
-                    selectedId = selectedPlaylistId,
-                    progress = importProgress,
-                    favFolders = favFolders,
-                    onSelect = onSelectPlaylist,
-                    onCreate = onCreatePlaylist,
-                    onLoadFavFolders = onLoadFavFolders,
-                    onImportFolder = onImportFolder,
-                    onImportToView = onImportToView,
-                    onOpenLocalMusic = onOpenLocalMusic,
-                    onImportSeason = onImportSeason,
-                    onImportSpace = onImportSpace,
-                    onDismissFavPicker = onDismissFavPicker,
-                    onConsumeProgressError = onConsumeProgressError,
-                )
-            }
-
-            Spacer(Modifier.width(14.dp))
-
-            // 中间：歌单详情 + 播放器
-            // 注意：这里**不能**用 verticalScroll —— 里面的 PlaylistDetail 含 LazyColumn，
-            // 可滚动容器嵌套会导致 "measured with infinity maximum height" 崩溃（踩过）。
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                PlaylistDetail(
+            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                PlaylistPage(
                     modifier = Modifier.weight(1f),
-                    playlistTitle = selectedPlaylistTitle,
+                    playlist = selectedPlaylist,
                     songs = songs,
-                    currentIndex = playback.index.takeIf { playback.queue.isNotEmpty() } ?: -1,
                     playlists = playlists,
+                    isCurrent = { song ->
+                        val current = playback.current
+                        current != null && current.bvid == song.bvid && current.cid == song.cid
+                    },
                     onPlayAll = { onPlayPlaylist(0) },
                     onPlayAt = onPlayPlaylist,
                     onCopyTo = onCopyTo,
                     onMoveTo = onMoveTo,
+                    onRename = onRenamePlaylist,
+                    onDelete = onDeletePlaylist,
+                    onSetCoverUrl = onSetCoverUrl,
+                    onSetCoverFile = onSetCoverFile,
                 )
-                PlayerPanel(
-                    state = playback,
-                    cover = cover,
-                    controller = controller,
-                    sleepTimer = sleepTimer,
-                    onStartSleep = onStartSleep,
-                    onCancelSleep = onCancelSleep,
-                    downloadBusy = downloadBusy,
-                    onDownload = onDownload,
-                )
-            }
 
-            Spacer(Modifier.width(14.dp))
-
-            // 右侧：播放队列
-            Box(modifier = Modifier.width(300.dp)) {
-                QueueList(state = playback, onPick = controller::playAt)
+                // 操作反馈条（原来是顶部一条提示，现在贴着播放条显示，不挡内容）
+                val message = playback.message ?: extraMessage
+                if (message != null) {
+                    MessageBar(
+                        text = message,
+                        onDismiss = controller::consumeMessage,
+                    )
+                }
             }
         }
 
-        if (showLocalMusic) {
-            LocalMusicDialog(
-                state = localMusic,
-                custom = localMusic.custom,
-                scanDirs = localScanDirs,
-                onScan = onScanLocal,
-                onPlayAll = onPlayLocal,
-                onImport = onImportLocal,
-                onAddDir = onAddLocalDir,
-                onRemoveDir = onRemoveLocalDir,
-                onResetDirs = onResetLocalDirs,
-                onDismiss = onDismissLocalMusic,
-            )
-        }
+        BmDivider()
+
+        PlayerBar(
+            state = playback,
+            cover = cover,
+            controller = controller,
+            sleepTimer = sleepTimer,
+            downloadBusy = downloadBusy,
+            onDownload = onDownload,
+            onStartSleep = onStartSleep,
+            onCancelSleep = onCancelSleep,
+        )
+    }
+
+    if (showLocalMusic) {
+        LocalMusicDialog(
+            state = localMusic,
+            custom = localMusic.custom,
+            scanDirs = localScanDirs,
+            onScan = onScanLocal,
+            onPlayAll = onPlayLocal,
+            onImport = onImportLocal,
+            onAddDir = onAddLocalDir,
+            onRemoveDir = onRemoveLocalDir,
+            onResetDirs = onResetLocalDirs,
+            onDismiss = onDismissLocalMusic,
+        )
+    }
+}
+
+/** 底部一条细长的操作反馈（导入结果、错误提示等） */
+@Composable
+private fun MessageBar(text: String, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .background(BmColors.brandSoft)
+            .padding(horizontal = BmDimens.contentPaddingX),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = BmType.bodySm,
+            color = BmColors.text2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = "知道了",
+            style = BmType.label,
+            color = BmColors.brand,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable(onClick = onDismiss)
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
