@@ -1,31 +1,39 @@
 package com.bilimusic.desktop.ui
 
+import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.Font
 import java.awt.Image
 import java.awt.MouseInfo
 import java.awt.SystemTray
+import java.awt.Toolkit
 import java.awt.TrayIcon
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
 import java.io.ByteArrayInputStream
 import javax.imageio.ImageIO
 import javax.swing.BorderFactory
-import javax.swing.JMenuItem
-import javax.swing.JPopupMenu
+import javax.swing.BoxLayout
+import javax.swing.JLabel
+import javax.swing.JPanel
 import javax.swing.JWindow
-import javax.swing.UIManager
 import javax.swing.border.EmptyBorder
 
 /**
- * 系统托盘（Swing 自绘菜单）。
+ * 系统托盘 + 自绘弹出菜单。
  *
- * 为什么不用 AWT 的 PopupMenu / MenuItem（交接文档坑 5 的最终解法）：
- * Windows 上的 AWT 菜单是原生 HMENU，由系统绘制，MenuItem.setFont() 会被忽略，
- * 于是永远用系统默认菜单字体 —— 部分环境下中文会画成方框（实测踩到）。
+ * 为什么不用 AWT PopupMenu（交接文档坑 5 的最终解法）：
+ * Windows 上它是原生 HMENU，由系统绘制，MenuItem.setFont() 会被忽略，
+ * 中文会画成方框（实测踩到）。
  *
- * 改用 Swing 的 JPopupMenu：Java2D 自绘，字体 / 颜色完全可控，
- * 中文渲染与主界面一致。代价是需要一个 1x1 的隐藏窗口当弹出宿主。
+ * 为什么也没用 Swing 的 JPopupMenu：它依赖 invoker 窗口 + 系统菜单焦点机制，
+ * 在托盘场景下 z-order 不可控（实测会出现菜单跑到应用窗口里、或关不掉的情况）。
+ * 这里改成自己包一个置顶 JWindow，菜单项用 JLabel 画，关闭逻辑全部自己管：
+ * 点菜单项 / 窗口失焦 / 再次右键，都会关掉。
  */
 class NativeTray(
     private val iconPng: ByteArray,
@@ -38,8 +46,7 @@ class NativeTray(
 ) {
 
     private var trayIcon: TrayIcon? = null
-    private var host: JWindow? = null
-    private val popup = JPopupMenu()
+    private var menuWindow: JWindow? = null
 
     private val menuFont: Font = run {
         val families = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames
@@ -53,10 +60,6 @@ class NativeTray(
         if (trayIcon != null) return
         if (!SystemTray.isSupported()) return
         val image: Image = runCatching { ImageIO.read(ByteArrayInputStream(iconPng)) }.getOrNull() ?: return
-
-
-        applyMenuTheme()
-        buildMenu()
 
         val icon = TrayIcon(image, tooltip).apply {
             isImageAutoSize = true
@@ -73,11 +76,10 @@ class NativeTray(
     }
 
     fun remove() {
+        hideMenu()
         val icon = trayIcon ?: return
         runCatching { SystemTray.getSystemTray().remove(icon) }
         trayIcon = null
-        host?.dispose()
-        host = null
     }
 
     private fun handleRightClick(e: MouseEvent) {
@@ -87,87 +89,101 @@ class NativeTray(
     }
 
     private fun showMenu() {
-        val location = MouseInfo.getPointerInfo()?.location ?: return
-        val invoker = host ?: JWindow().also { host = it }
-        invoker.setSize(1, 1)
-        invoker.setLocation(location)
-        invoker.isAlwaysOnTop = true
-        invoker.isVisible = true
-        invoker.toFront()
-        invoker.requestFocus()
-        // 注意：show 之后不能立刻隐藏 invoker，否则 JPopupMenu 会跟着关闭。
-        // 等菜单关闭时再由 PopupMenuListener 把宿主收起来。
-        popup.show(invoker, 0, 0)
-    }
+        val mouse = MouseInfo.getPointerInfo()?.location ?: return
+        hideMenu()
 
-    private fun buildMenu() {
-        fun item(text: String, action: () -> Unit) {
-            val menuItem = JMenuItem(text).apply {
-                font = menuFont
-                isOpaque = true
-                background = MENU_BG
-                foreground = MENU_FG
-                border = EmptyBorder(7, 14, 7, 26)
-                addActionListener {
-                    runCatching { popup.isVisible = false }
-                    runCatching { action() }
-                }
-            }
-            popup.add(menuItem)
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = MENU_BG
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(MENU_BORDER),
+                EmptyBorder(5, 0, 5, 0),
+            )
         }
 
-        popup.addPopupMenuListener(object : javax.swing.event.PopupMenuListener {
-            override fun popupMenuWillBecomeVisible(e: javax.swing.event.PopupMenuEvent) = Unit
+        fun item(text: String, action: () -> Unit) {
+            val row = JLabel(text).apply {
+                font = menuFont
+                foreground = MENU_FG
+                border = EmptyBorder(7, 18, 7, 36)
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseEntered(e: MouseEvent) {
+                        isOpaque = true
+                        background = MENU_SELECTION
+                        repaint()
+                    }
 
-            override fun popupMenuWillBecomeInvisible(e: javax.swing.event.PopupMenuEvent) {
-                host?.isVisible = false
-            }
+                    override fun mouseExited(e: MouseEvent) {
+                        isOpaque = false
+                        repaint()
+                    }
 
-            override fun popupMenuCanceled(e: javax.swing.event.PopupMenuEvent) {
-                host?.isVisible = false
+                    override fun mouseClicked(e: MouseEvent) {
+                        hideMenu()
+                        runCatching { action() }
+                    }
+                })
             }
-        })
+            panel.add(row)
+        }
+
+        fun separator() {
+            val line = JPanel().apply {
+                background = MENU_BORDER
+                isOpaque = true
+                preferredSize = Dimension(1, 1)
+            }
+            val gap = JPanel(BorderLayout()).apply {
+                background = MENU_BG
+                isOpaque = true
+                border = EmptyBorder(4, 0, 4, 0)
+                preferredSize = Dimension(1, 9)
+                maximumSize = Dimension(Int.MAX_VALUE, 9)
+                add(line, BorderLayout.CENTER)
+            }
+            panel.add(gap)
+        }
 
         item("显示窗口") { onShowWindow() }
-        addSeparator()
+        separator()
         item("播放 / 暂停") { onPlayPause() }
         item("上一首") { onPrevious() }
         item("下一首") { onNext() }
-        addSeparator()
-        item("退出") { onExit() }
+        separator()
+        item("退出") {
+            remove()
+            onExit()
+        }
+
+        val window = JWindow()
+        window.contentPane.add(panel)
+        window.isAlwaysOnTop = true
+        // preferredSize 偶尔会差几个像素把长菜单项截成省略号，这里补一点余量
+        val preferred = panel.preferredSize
+        window.setSize(preferred.width + 14, preferred.height)
+        // 优先弹在鼠标右下方；贴边时向内收，避免跑出屏幕
+        val screen = Toolkit.getDefaultToolkit().screenSize
+        var x = mouse.x
+        var y = mouse.y
+        if (x + window.width > screen.width) x = screen.width - window.width
+        if (y + window.height > screen.height) y = mouse.y - window.height
+        window.setLocation(x, y)
+        window.addWindowFocusListener(object : WindowFocusListener {
+            override fun windowGainedFocus(e: WindowEvent) = Unit
+
+            override fun windowLostFocus(e: WindowEvent) = hideMenu()
+        })
+        window.isVisible = true
+        window.toFront()
+        window.requestFocus()
+        menuWindow = window
     }
 
-    /** 自绘分隔线：Metal 的 JSeparator 画出来是一条亮白线，跟深色菜单不搭 */
-    private fun addSeparator() {
-        val outer = javax.swing.JPanel(java.awt.BorderLayout()).apply {
-            isOpaque = true
-            background = MENU_BG
-            border = EmptyBorder(4, 0, 4, 0)
-            preferredSize = java.awt.Dimension(1, 9)
-            maximumSize = java.awt.Dimension(Int.MAX_VALUE, 9)
-        }
-        val line = javax.swing.JPanel().apply {
-            isOpaque = true
-            background = MENU_BORDER
-            preferredSize = java.awt.Dimension(1, 1)
-        }
-        outer.add(line, java.awt.BorderLayout.CENTER)
-        popup.add(outer)
-    }
-
-    private fun applyMenuTheme() {
-        UIManager.put("PopupMenu.background", MENU_BG)
-        UIManager.put("PopupMenu.border", BorderFactory.createLineBorder(MENU_BORDER, 1, true))
-        UIManager.put("MenuItem.font", menuFont)
-        UIManager.put("MenuItem.background", MENU_BG)
-        UIManager.put("MenuItem.foreground", MENU_FG)
-        UIManager.put("MenuItem.selectionBackground", MENU_SELECTION)
-        UIManager.put("MenuItem.selectionForeground", Color.WHITE)
-        UIManager.put("MenuItem.borderPainted", false)
-        UIManager.put("Separator.background", MENU_BG)
-        UIManager.put("Separator.foreground", MENU_BORDER)
-        popup.background = MENU_BG
-        popup.border = BorderFactory.createLineBorder(MENU_BORDER, 1, true)
+    private fun hideMenu() {
+        val window = menuWindow ?: return
+        menuWindow = null
+        runCatching { window.dispose() }
     }
 
     private companion object {

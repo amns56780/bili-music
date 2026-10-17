@@ -67,7 +67,11 @@ import com.bilimusic.desktop.ui.rememberRemoteImage
  * 与安卓版共用 `shared` 模块：WBI 签名、接口 DTO/API、Cookie 解析、取流逻辑、音质选择、播放模式。
  * 桌面独有的是 UI 与 VLC 播放内核（见 [com.bilimusic.desktop.player.VlcPlayer]）。
  */
-fun main() = application {
+fun main() {
+    // 单实例保护：已有实例在跑时，通知它把窗口显示出来，然后本进程直接退出。
+    // 否则会出现多个托盘图标 + 多份播放（Windows 强杀进程还会留下残留图标）。
+    if (!SingleInstance.acquire()) return
+    application {
     val windowState = rememberWindowState(size = DpSize(1240.dp, 860.dp))
     var windowVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
@@ -77,6 +81,11 @@ fun main() = application {
 
     // 应用级依赖建在 application 作用域，托盘菜单才能直接控制播放
     val app = rememberDesktopApp(scope)
+
+    // 第二个实例启动时会把 "show" 发过来，这里响应成「把窗口显示出来」
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        SingleInstance.onActivate.set { windowVisible = true }
+    }
 
     Window(
         // 关闭窗口只收进托盘，音乐继续放（托盘菜单里可真正退出）
@@ -193,6 +202,7 @@ fun main() = application {
     }
     // install() 是幂等的，重复调用没有副作用
     nativeTray.install()
+    }
 }
 
 /** 创建应用级依赖（只建一次） */
