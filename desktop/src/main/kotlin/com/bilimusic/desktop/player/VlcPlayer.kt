@@ -36,10 +36,13 @@ class VlcPlayer {
     private val factory: MediaPlayerFactory = MediaPlayerFactory(
         "--no-video",
         "--quiet",
-        ":http-referrer=${BiliHeaderInterceptor.REFERER}",
-        ":http-user-agent=${BiliHeaderInterceptor.USER_AGENT}",
+        // ★ 这里必须是 "--" 前缀（libvlc 的全局实例参数）。
+        // 之前写成 ":http-referrer=..."（单冒号是 media 选项语法），传给 MediaPlayerFactory
+        // 会被静默忽略 —— 请求不带 Referer/UA，B 站 CDN 直接 403，表现为「这个地址播不了」。
+        "--http-referrer=" + BiliHeaderInterceptor.REFERER,
+        "--http-user-agent=" + BiliHeaderInterceptor.USER_AGENT,
         // Playback starts sooner with a smaller cache; B站音频码率不高，300ms 足够
-        ":network-caching=300",
+        "--network-caching=300",
         // Explicit low-latency Windows audio output module (falls back automatically)
         "--aout=mmdevice",
     )
@@ -82,6 +85,12 @@ class VlcPlayer {
                 }
 
                 override fun error(mediaPlayer: MediaPlayer) {
+                    // 打印 VLC 实际在放的地址和状态，定位「地址过期」这类问题时必需
+                    runCatching {
+                        val mrl = mediaPlayer.media().info().mrl()
+                        val st = mediaPlayer.status().state()
+                        println("[Vlc] ERROR state=" + st + " mrl=" + mrl)
+                    }
                     state = state.copy(error = "这个地址播不了（可能已过期），正在重试")
                     onStateChanged(state)
                 }
@@ -115,7 +124,13 @@ class VlcPlayer {
         // --audio-volume takes a float where 1.0 == 100%.
         val volumeOption = ":audio-volume=" + String.format(java.util.Locale.US, "%.2f", desiredVolume / 100.0)
         player.audio().setVolume(desiredVolume)
-        player.media().play(url, volumeOption)
+        // 双保险：媒体级选项一定对该次播放生效（全局选项万一被某个 VLC 版本忽略还有这层）
+        player.media().play(
+            url,
+            ":http-referrer=" + BiliHeaderInterceptor.REFERER,
+            ":http-user-agent=" + BiliHeaderInterceptor.USER_AGENT,
+            volumeOption,
+        )
     }
 
     fun pause() {
