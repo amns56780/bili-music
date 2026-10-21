@@ -74,12 +74,21 @@ class PlaybackController(
     /** 定时关闭：置位后当前曲播完就停 */
     private var stopAfterCurrentTrack = false
 
+    /** 中断自动重连次数（换歌时重置，同一首最多重试 3 次） */
+    private var interruptionRetries = 0
+
+    /** 重新加载完成后要跳转到的位置（拖动进度条但当时没有活动媒体时记下来） */
+    private var pendingSeekMs: Long? = null
+
     private companion object {
         const val TAG = "DesktopPlayback"
         /** 进度回写节流：VLC 每秒回调多次，太频繁会让 UI 抖动 */
         const val TICK_MS = 500L
         /** Volume persistence key. */
         const val KEY_VOLUME = "desktop.volume"
+
+        /** 同一首歌被中断后最多自动重连几次 */
+        const val MAX_INTERRUPTION_RETRIES = 3
     }
 
     init {
@@ -104,6 +113,10 @@ class PlaybackController(
             // VLC 事件线程 → 切到协程里做切歌
             scope.launch { onTrackFinished() }
         }
+        // 播放被 VLC 中断（网络抖动 / 取流地址失效 / 解码错误）→ 自动重连
+        player.onInterrupted = { reason ->
+            scope.launch { handleInterruption(reason) }
+        }
     }
 
     // ---------------- 队列 ----------------
@@ -116,6 +129,8 @@ class PlaybackController(
             tracks.indices.toList()
         }
         val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        interruptionRetries = 0
+        pendingSeekMs = null
         _state.value = _state.value.copy(queue = tracks, index = safeIndex, positionMs = 0L, durationMs = 0L)
         playCurrent()
     }
@@ -125,6 +140,8 @@ class PlaybackController(
 
     fun playAt(index: Int) {
         if (index !in _state.value.queue.indices) return
+        interruptionRetries = 0
+        pendingSeekMs = null
         _state.value = _state.value.copy(index = index, positionMs = 0L, durationMs = 0L)
         playCurrent()
     }
@@ -217,6 +234,16 @@ class PlaybackController(
     // ---------------- 控制 ----------------
 
     fun togglePlayPause() {
+        // VLC 里已经没有可操作的媒体（播放中断/停止后）→ resume() 是空操作，
+        // 表现为「点播放没反应」。这种情况下直接重新加载当前曲目。
+        if (!player.hasActiveMedia()) {
+            val track = _state.value.current
+            if (track != null) {
+                AppLog.i(TAG, "没有活动媒体，重新加载：" + track.title)
+                retryCurrent()
+            }
+            return
+        }
         if (_state.value.playing) player.pause() else player.resume()
     }
 
@@ -233,7 +260,17 @@ class PlaybackController(
     }
 
     fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs.coerceIn(0L, _state.value.durationMs))
+        val target = positionMs.coerceIn(0L, _state.value.durationMs)
+        // 没有活动媒体时 setTime 无效，UI 上表现为「拖动后又跳回去」。
+        // 记下目标位置，重新加载完成后再跳过去。
+        if (!player.hasActiveMedia()) {
+            if (_state.value.current == null) return
+            AppLog.w(TAG, "没有活动媒体，记录待跳转位置 " + target + "ms 并重新加载")
+            pendingSeekMs = target
+            retryCurrent()
+            return
+        }
+        player.seekTo(target)
     }
 
     /**
@@ -293,11 +330,55 @@ class PlaybackController(
         }
     }
 
+    /**
+     * VLC 播放被中断（网络抖动 / 取流地址失效 / 解码错误）时的自动恢复。
+     *
+     * 之前没有这个逻辑：中断后 VLC 停在 ERROR，UI 上点播放没反应、拖进度条又跳回去，
+     * 只能靠用户手动换歌。现在自动重取流 + 回到原来的播放位置，最多 3 次。
+     */
+    private suspend fun handleInterruption(reason: String) {
+        val track = _state.value.current ?: return
+        if (!track.localPath.isNullOrBlank()) {
+            _state.value = _state.value.copy(message = "本地文件播放中断：" + reason)
+            return
+        }
+        if (interruptionRetries >= MAX_INTERRUPTION_RETRIES) {
+            AppLog.e(TAG, "播放中断，重试已达上限：" + track.title)
+            _state.value = _state.value.copy(
+                message = "播放中断（" + reason + "），点播放按钮重试",
+            )
+            return
+        }
+        interruptionRetries++
+        val resumeAt = _state.value.positionMs
+        AppLog.w(TAG, "播放中断（" + reason + "），第 " + interruptionRetries + " 次自动重连：" + track.title)
+        _state.value = _state.value.copy(
+            message = "播放中断，正在重新连接（第 " + interruptionRetries + " 次）…",
+        )
+        kotlinx.coroutines.delay(600)
+        streamUrls.invalidate(track.bvid, track.cid)
+        playCurrent()
+        if (resumeAt > 3000) {
+            kotlinx.coroutines.delay(900)
+            player.seekTo(resumeAt)
+            AppLog.i(TAG, "已恢复到 " + resumeAt + "ms")
+        }
+    }
+
     /** 取流地址过期 / 播放失败：清缓存重取一次 */
     fun retryCurrent() {
         val key = currentKey ?: return
+        interruptionRetries = 0
         streamUrls.invalidate(key.first, key.second)
         playCurrent()
+        // 之前拖动进度条但当时没有活动媒体 → 重新加载后跳到目标位置
+        pendingSeekMs?.let { pos ->
+            pendingSeekMs = null
+            scope.launch {
+                kotlinx.coroutines.delay(900)
+                player.seekTo(pos)
+            }
+        }
     }
 
     /** 定时关闭：等当前这首自然播完再停 */

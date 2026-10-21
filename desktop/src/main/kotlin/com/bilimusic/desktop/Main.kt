@@ -74,6 +74,9 @@ fun main() {
     // （纯英文文件名的却能播，表现极具迷惑性）。
     // JNA 在 Native 类初始化时读取这个属性，所以必须在创建 VlcPlayer 之前设好。
     System.setProperty("jna.encoding", "UTF-8")
+    // 安装版是 javaw（没有控制台），stdout 等于黑洞 —— 所有日志同时写进
+    // ~/.bilimusic/app.log，否则「突然没声音了」这类反馈完全没有现场可查。
+    setupFileLogging()
     // 单实例保护：已有实例在跑时，通知它把窗口显示出来，然后本进程直接退出。
     // 否则会出现多个托盘图标 + 多份播放（Windows 强杀进程还会留下残留图标）。
     if (!SingleInstance.acquire()) return
@@ -631,6 +634,24 @@ private fun VlcMissingHint() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/** 把 AppLog 同时写到 ~/.bilimusic/app.log（超过 2MB 滚动成 app.1.log） */
+private fun setupFileLogging() {
+    runCatching {
+        val dir = java.io.File(System.getProperty("user.home"), ".bilimusic").apply { mkdirs() }
+        val logFile = java.io.File(dir, "app.log")
+        if (logFile.exists() && logFile.length() > 2L * 1024 * 1024) {
+            runCatching { logFile.renameTo(java.io.File(dir, "app.1.log")) }
+        }
+        val fmt = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+        com.bilimusic.app.util.AppLog.logger = { level, tag, message, error ->
+            val err = error?.let { " | " + it.javaClass.simpleName + ": " + it.message }.orEmpty()
+            val line = "[" + level + "] " + fmt.format(java.util.Date()) + " " + tag + ": " + message + err
+            println(line)
+            runCatching { logFile.appendText(line + System.lineSeparator()) }
+        }
     }
 }
 

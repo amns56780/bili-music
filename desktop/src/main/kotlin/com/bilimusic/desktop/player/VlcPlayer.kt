@@ -60,16 +60,42 @@ class VlcPlayer {
     private var sessionVolume: Float = 0.8f
     private var finishedCounter = 0L
 
+    /** 用户主动停止（避免把主动停止误判成「意外中断」） */
+    @Volatile
+    private var userStopped = false
+
+    /** 正在切歌（切歌时的 stopped 也是正常现象） */
+    @Volatile
+    private var switchingTrack = false
+
     /** 状态变化回调（在 VLC 的事件线程上调用，UI 侧注意切回主线程） */
     var onStateChanged: (State) -> Unit = {}
 
     /** 一首播完的回调 */
     var onFinished: () -> Unit = {}
 
+    /** 播放被中断（VLC 报错 / 意外停止）→ 上层做自动重连 */
+    var onInterrupted: ((reason: String) -> Unit)? = null
+
+    /**
+     * 当前 VLC 里是否还有一个「可以操作」的媒体。
+     *
+     * 播放中断后 VLC 会停在 ERROR/STOPPED，此时 resume()/setTime() 都是空操作 ——
+     * UI 上就表现为「点播放没反应、拖进度条又跳回去」。上层据此决定是重载还是 resume。
+     */
+    fun hasActiveMedia(): Boolean = runCatching {
+        val st = player.status().state()
+        st != uk.co.caprica.vlcj.player.base.State.STOPPED &&
+            st != uk.co.caprica.vlcj.player.base.State.ERROR &&
+            st != uk.co.caprica.vlcj.player.base.State.ENDED
+    }.getOrDefault(false)
+
     init {
         player.events().addMediaPlayerEventListener(
             object : MediaPlayerEventAdapter() {
                 override fun playing(mediaPlayer: MediaPlayer) {
+                    userStopped = false
+                    switchingTrack = false
                     // VLC 每开始播放新媒体都会把会话音量重置成它自己的 gain（1.0），
                     // 所以这里把目标音量重新写回 Windows 会话一次。
                     applySessionVolume()
@@ -84,7 +110,15 @@ class VlcPlayer {
                     publish(playing = true)
                 }
                 override fun paused(mediaPlayer: MediaPlayer) = publish(playing = false)
-                override fun stopped(mediaPlayer: MediaPlayer) = publish(playing = false)
+
+                override fun stopped(mediaPlayer: MediaPlayer) {
+                    publish(playing = false)
+                    // 既不是用户点停止、也不是切歌 → 网络/解码层把播放弄停了，交给上层重连
+                    if (!userStopped && !switchingTrack) {
+                        println("[Vlc] 播放意外停止（非用户操作）")
+                        onInterrupted?.invoke("播放意外停止")
+                    }
+                }
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) =
                     publish(positionMs = newTime)
 
@@ -92,6 +126,7 @@ class VlcPlayer {
                     publish(durationMs = newLength)
 
                 override fun finished(mediaPlayer: MediaPlayer) {
+                    userStopped = true // 自然播完，不算中断
                     finishedCounter += 1
                     publish(playing = false, positionMs = 0L, finishedTick = finishedCounter)
                     onFinished()
@@ -104,8 +139,9 @@ class VlcPlayer {
                         val st = mediaPlayer.status().state()
                         println("[Vlc] ERROR state=" + st + " mrl=" + mrl)
                     }
-                    state = state.copy(error = "这个地址播不了（可能已过期），正在重试")
+                    state = state.copy(error = "播放中断，正在重新连接…")
                     onStateChanged(state)
+                    onInterrupted?.invoke("VLC 报错")
                 }
             },
         )
@@ -177,12 +213,14 @@ class VlcPlayer {
     }
 
     fun stop() {
+        userStopped = true
         player.controls().stop()
         publish(playing = false, positionMs = 0L)
     }
 
     /** 切歌前把状态归零，避免 UI 短暂显示上一首的时长 */
     fun resetForNewTrack() {
+        switchingTrack = true
         state = state.copy(positionMs = 0L, durationMs = 0L)
         onStateChanged(state)
     }
