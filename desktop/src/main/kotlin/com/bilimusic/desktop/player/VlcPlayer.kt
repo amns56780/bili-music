@@ -1,6 +1,7 @@
 package com.bilimusic.desktop.player
 
 import com.bilimusic.app.data.remote.BiliHeaderInterceptor
+import com.bilimusic.app.util.AppLog
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
@@ -96,6 +97,7 @@ class VlcPlayer {
                 override fun playing(mediaPlayer: MediaPlayer) {
                     userStopped = false
                     switchingTrack = false
+                    AppLog.i("VlcPlayer", "事件: playing")
                     // VLC 每开始播放新媒体都会把会话音量重置成它自己的 gain（1.0），
                     // 所以这里把目标音量重新写回 Windows 会话一次。
                     applySessionVolume()
@@ -109,9 +111,16 @@ class VlcPlayer {
                     }.apply { isDaemon = true }.start()
                     publish(playing = true)
                 }
-                override fun paused(mediaPlayer: MediaPlayer) = publish(playing = false)
+                override fun paused(mediaPlayer: MediaPlayer) {
+                    AppLog.i("VlcPlayer", "事件: paused")
+                    publish(playing = false)
+                }
 
                 override fun stopped(mediaPlayer: MediaPlayer) {
+                    AppLog.w(
+                        "VlcPlayer",
+                        "事件: stopped (userStopped=" + userStopped + ", switching=" + switchingTrack + ")",
+                    )
                     publish(playing = false)
                     // 既不是用户点停止、也不是切歌 → 网络/解码层把播放弄停了，交给上层重连
                     if (!userStopped && !switchingTrack) {
@@ -137,7 +146,7 @@ class VlcPlayer {
                     runCatching {
                         val mrl = mediaPlayer.media().info().mrl()
                         val st = mediaPlayer.status().state()
-                        println("[Vlc] ERROR state=" + st + " mrl=" + mrl)
+                        AppLog.e("VlcPlayer", "事件: ERROR state=" + st + " mrl=" + mrl)
                     }
                     state = state.copy(error = "播放中断，正在重新连接…")
                     onStateChanged(state)

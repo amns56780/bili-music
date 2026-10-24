@@ -244,7 +244,23 @@ class PlaybackController(
             }
             return
         }
-        if (_state.value.playing) player.pause() else player.resume()
+        if (_state.value.playing) {
+            player.pause()
+            AppLog.i(TAG, "用户暂停")
+        } else {
+            player.resume()
+            AppLog.i(TAG, "用户恢复播放")
+            // 兜底：VLC 的 setPause(false) 会在「音频输出设备被独占/切换」后静默失败 ——
+            // 状态看着是 PAUSED、API 也返回成功，但就是不出声也不走时间。
+            // 1.2 秒后如果还没真正播起来，就重建媒体（重新取流）。
+            scope.launch {
+                kotlinx.coroutines.delay(1200)
+                if (!_state.value.playing && _state.value.current != null && !_state.value.loading) {
+                    AppLog.w(TAG, "resume 后仍未播放，自动重建媒体")
+                    retryCurrent()
+                }
+            }
+        }
     }
 
     fun next() {
@@ -271,6 +287,19 @@ class PlaybackController(
             return
         }
         player.seekTo(target)
+        // 兜底：媒体卡死时 setTime 也会静默失败（UI 上就是「拖动后跳回去」）。
+        // 1.5 秒后位置没跟上就重建媒体，并跳到目标位置。
+        scope.launch {
+            kotlinx.coroutines.delay(1500)
+            val pos = _state.value.positionMs
+            if (_state.value.current != null && !_state.value.loading &&
+                kotlin.math.abs(pos - target) > 5000
+            ) {
+                AppLog.w(TAG, "seek 无效（当前位置 " + pos + "，目标 " + target + "），重新加载")
+                pendingSeekMs = target
+                retryCurrent()
+            }
+        }
     }
 
     /**
