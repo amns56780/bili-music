@@ -541,6 +541,11 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                 val added = app.store.moveSongsTo(targetId, ids)
                                 playback.reportError("已移动 $added 首（重复的自动跳过）")
                             },
+                            onRemoveSongs = { ids ->
+                                // 只从歌单里删记录：不动 B 站收藏，也不删本地文件
+                                app.store.removeSongs(ids)
+                                playback.reportError("已从歌单移除 " + ids.size + " 首")
+                            },
                             onImportSeason = { raw ->
                                 if (authState.account == null) {
                                     showLogin = true

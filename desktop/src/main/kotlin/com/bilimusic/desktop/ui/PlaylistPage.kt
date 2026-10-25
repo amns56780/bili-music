@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,6 +77,7 @@ fun PlaylistPage(
     onPlayAt: (Int) -> Unit,
     onCopyTo: (Long, Set<Long>) -> Unit,
     onMoveTo: (Long, Set<Long>) -> Unit,
+    onRemoveSongs: (Set<Long>) -> Unit,
     onRename: (Long, String) -> Unit,
     onDelete: (Long) -> Unit,
     onSetCoverUrl: (Long, String?) -> Unit,
@@ -96,6 +98,7 @@ fun PlaylistPage(
     var showRename by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var showCoverPicker by remember { mutableStateOf(false) }
+    var showRemove by remember { mutableStateOf(false) }
 
     val targets = playlists.filter { it.id != pl.id }
     val source = sourceName(pl.sourceType)
@@ -230,6 +233,9 @@ fun PlaylistPage(
                 SmallAction("全选") { selected = songs.map { it.id }.toSet() }
                 SmallAction("反选") { selected = songs.map { it.id }.toSet() - selected }
                 Spacer(Modifier.weight(1f))
+                SmallAction("移除", enabled = selected.isNotEmpty(), danger = true) {
+                    showRemove = true
+                }
                 Box {
                     SmallAction("复制到", enabled = selected.isNotEmpty() && targets.isNotEmpty()) {
                         copyMenu = true
@@ -318,6 +324,10 @@ fun PlaylistPage(
                         song = song,
                         current = isCurrent(song),
                         selected = selected.contains(song.id),
+                        onRemove = {
+                            // 单曲直接移除（行尾悬浮的 ⋯ 菜单里）
+                            onRemoveSongs(setOf(song.id))
+                        },
                         onClick = {
                             if (selectionMode) {
                                 selected = if (selected.contains(song.id)) selected - song.id else selected + song.id
@@ -342,6 +352,40 @@ fun PlaylistPage(
             onConfirm = { text ->
                 if (text.isNotBlank()) onRename(pl.id, text.trim())
                 showRename = false
+            },
+        )
+    }
+
+    if (showRemove) {
+        AlertDialog(
+            onDismissRequest = { showRemove = false },
+            containerColor = BmColors.dialog,
+            titleContentColor = BmColors.text,
+            textContentColor = BmColors.text2,
+            title = { Text("从歌单移除", style = BmType.titleL) },
+            text = {
+                Text(
+                    text = "确定把选中的 " + selected.size + " 首从「" + pl.title + "」移除吗？\n" +
+                        "只影响这个歌单，不会删除 B 站收藏，也不会删本地文件。",
+                    style = BmType.bodySm,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveSongs(selected)
+                        showRemove = false
+                        selectionMode = false
+                        selected = emptySet()
+                    },
+                ) {
+                    Text("移除", style = BmType.body, color = BmColors.brand)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemove = false }) {
+                    Text("取消", style = BmType.body, color = BmColors.text2)
+                }
             },
         )
     }
@@ -464,9 +508,11 @@ private fun SongRow(
     current: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
+    onRemove: (() -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    var rowMenu by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -517,6 +563,31 @@ private fun SongRow(
             modifier = Modifier.width(66.dp),
             textAlign = TextAlign.End,
         )
+        // 行尾操作：悬浮时出现 ⋯，可直接把这首从歌单移除
+        Box(modifier = Modifier.width(30.dp), contentAlignment = Alignment.Center) {
+            if (onRemove != null && (hovered || rowMenu)) {
+                Box {
+                    BmIconButton(
+                        icon = Icons.Outlined.MoreVert,
+                        contentDescription = "更多操作",
+                        onClick = { rowMenu = true },
+                        iconSize = 16.dp,
+                        tint = BmColors.text2,
+                    )
+                    BmPopupMenu(
+                        expanded = rowMenu,
+                        onDismiss = { rowMenu = false },
+                        alignEnd = true,
+                        width = 160.dp,
+                    ) {
+                        BmMenuItem("从歌单移除", danger = true) {
+                            rowMenu = false
+                            onRemove()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -600,7 +671,12 @@ private fun Tag(text: String) {
 }
 
 @Composable
-private fun SmallAction(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+private fun SmallAction(
+    text: String,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     Text(
@@ -608,6 +684,7 @@ private fun SmallAction(text: String, enabled: Boolean = true, onClick: () -> Un
         style = BmType.bodySm,
         color = when {
             !enabled -> BmColors.text3.copy(alpha = 0.5f)
+            danger -> BmColors.brand
             hovered -> BmColors.text
             else -> BmColors.text2
         },
