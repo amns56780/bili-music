@@ -7,6 +7,7 @@ import com.bilimusic.app.data.remote.dto.FavFolderDto
 import com.bilimusic.app.domain.model.PlaylistSourceType
 import com.bilimusic.app.util.AppLog
 import com.bilimusic.app.util.BiliLinkParser
+import com.bilimusic.app.util.PlaylistShareCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -361,6 +362,64 @@ class ImportService(
                 error = if (failed.isEmpty()) null else
                     "有 " + failed.size + " 个没导入：" + failed.take(3).joinToString("、") +
                         (if (failed.size > 3) " 等" else ""),
+            )
+        }
+    }
+    /**
+     * 从分享链接导入整个歌单（bm://pl/v1/…，见 PlaylistShareCodec）。
+     *
+     * 会新建一个歌单（标题用分享里的标题），再逐条取视频信息落库，
+     * 所以不需要任何服务器或云同步。
+     */
+    fun importFromShareLink(text: String) {
+        scope.launch {
+            val shared = PlaylistShareCodec.decode(text)
+            if (shared == null) {
+                _progress.value = ImportProgress(
+                    error = "这不是有效的歌单分享链接（应以 " + PlaylistShareCodec.PREFIX + " 开头）",
+                )
+                return@launch
+            }
+            val name = shared.t.ifBlank { "分享的歌单" }
+            _progress.value = ImportProgress(
+                running = true,
+                text = "正在导入「" + name + "」…",
+                total = shared.s.size,
+            )
+            val playlistId = store.createPlaylist(name, PlaylistSourceType.MANUAL)
+            val songs = mutableListOf<NewSong>()
+            val failed = mutableListOf<String>()
+            shared.s.forEachIndexed { index, bvid ->
+                client.requestThrottle.await()
+                val signed = client.wbiSigner.sign(mapOf("bvid" to bvid))
+                when (val result = apiCall(maxAttempts = 1) { client.api.videoView(signed) }) {
+                    is ApiResult.Success -> {
+                        val data = result.data
+                        if (data.cid <= 0L) {
+                            failed += bvid + "（无音轨）"
+                        } else {
+                            songs += NewSong(
+                                bvid = data.bvid.ifBlank { bvid },
+                                cid = data.cid,
+                                title = data.title.ifBlank { bvid },
+                                artist = data.owner?.name.orEmpty(),
+                                coverUrl = data.pic,
+                                durationMs = data.duration * 1000L,
+                            )
+                        }
+                    }
+                    is ApiResult.Error -> failed += bvid + "（" + result.failure.userMessage + "）"
+                }
+                _progress.value = _progress.value.copy(
+                    text = "正在导入：" + (index + 1) + "/" + shared.s.size,
+                    current = index + 1,
+                )
+            }
+            val added = if (songs.isEmpty()) 0 else store.addSongs(playlistId, songs)
+            _progress.value = ImportProgress(
+                text = "已导入「" + name + "」：" + added + " 首",
+                error = if (failed.isEmpty()) null else
+                    "有 " + failed.size + " 个没导入：" + failed.take(3).joinToString("、"),
             )
         }
     }

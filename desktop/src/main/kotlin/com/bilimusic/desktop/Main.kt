@@ -445,6 +445,9 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     app.importer.importToView()
                                 }
                             },
+                            onImportShareLink = { text ->
+                                app.importer.importFromShareLink(text)
+                            },
                             onImportBvids = { text ->
                                 val pid = selectedPlaylistId
                                 if (pid == null) {

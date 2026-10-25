@@ -67,6 +67,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import com.bilimusic.app.util.PlaylistShareCodec
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -268,6 +273,8 @@ fun PlaylistDetailScreen(
     val selectedSongIds by viewModel.selectedSongIds.collectAsStateWithLifecycle()
     val batchTarget by viewModel.batchTarget.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val clipboardManager = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
 
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -343,6 +350,26 @@ fun PlaylistDetailScreen(
                                 onClick = {
                                     showMoreMenu = false
                                     showRenameDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("分享歌单") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    val pl = uiState.playlist
+                                    if (pl != null) {
+                                        val link = PlaylistShareCodec.encode(
+                                            pl.title,
+                                            uiState.songs.map { it.bvid },
+                                        )
+                                        clipboardManager.setText(AnnotatedString(link))
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "歌单链接已复制，发给另一台设备粘贴导入（共 " +
+                                                    uiState.songs.size + " 首）",
+                                            )
+                                        }
+                                    }
                                 },
                             )
                             DropdownMenuItem(

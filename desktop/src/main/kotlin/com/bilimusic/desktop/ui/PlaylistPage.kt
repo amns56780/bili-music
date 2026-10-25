@@ -53,6 +53,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.selection.SelectionContainer
+import com.bilimusic.app.util.PlaylistShareCodec
 import com.bilimusic.desktop.data.StoredPlaylist
 import com.bilimusic.desktop.data.StoredSong
 import com.bilimusic.desktop.ui.theme.BmColors
@@ -99,6 +101,7 @@ fun PlaylistPage(
     var showDelete by remember { mutableStateOf(false) }
     var showCoverPicker by remember { mutableStateOf(false) }
     var showRemove by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
 
     val targets = playlists.filter { it.id != pl.id }
     val source = sourceName(pl.sourceType)
@@ -208,6 +211,11 @@ fun PlaylistPage(
                                     moreMenu = false
                                     onSetCoverUrl(pl.id, null)
                                 }
+                            }
+                            BmMenuDivider()
+                            BmMenuItem("分享歌单") {
+                                moreMenu = false
+                                showShare = true
                             }
                             BmMenuDivider()
                             BmMenuItem("删除歌单", danger = true) {
@@ -353,6 +361,14 @@ fun PlaylistPage(
                 if (text.isNotBlank()) onRename(pl.id, text.trim())
                 showRename = false
             },
+        )
+    }
+
+    if (showShare) {
+        SharePlaylistDialog(
+            title = pl.title,
+            songs = songs,
+            onDismiss = { showShare = false },
         )
     }
 
@@ -667,6 +683,62 @@ private fun Tag(text: String) {
             .clip(RoundedCornerShape(BmDimens.radiusTag))
             .background(BmColors.tagBg)
             .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+/** 分享歌单：把歌单编码成 bm:// 链接，复制后另一台设备粘贴即可导入 */
+@Composable
+private fun SharePlaylistDialog(
+    title: String,
+    songs: List<StoredSong>,
+    onDismiss: () -> Unit,
+) {
+    val link = remember(title, songs) {
+        PlaylistShareCodec.encode(title, songs.map { it.bvid })
+    }
+    var copied by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BmColors.dialog,
+        titleContentColor = BmColors.text,
+        textContentColor = BmColors.text2,
+        title = { Text("分享歌单", style = BmType.titleL) },
+        text = {
+            Column {
+                Text(
+                    "把下面的链接发给另一台设备，在 BM 的「导入歌单 → 从分享链接导入」里粘贴，就能导入整个歌单。",
+                    style = BmType.bodySm,
+                )
+                Spacer(Modifier.height(10.dp))
+                SelectionContainer {
+                    Text(link, style = BmType.label, color = BmColors.text2)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "共 " + songs.size + " 首 · 链接 " + link.length + " 个字符",
+                    style = BmType.label,
+                    color = BmColors.text3,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    runCatching {
+                        java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                            java.awt.datatransfer.StringSelection(link),
+                            null,
+                        )
+                        copied = true
+                    }
+                },
+            ) {
+                Text(if (copied) "已复制" else "复制链接", style = BmType.body, color = BmColors.brand)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭", style = BmType.body, color = BmColors.text2) }
+        },
     )
 }
 

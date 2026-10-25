@@ -80,6 +80,7 @@ fun Sidebar(
     onImportSeason: (String) -> Unit,
     onImportSpace: (String) -> Unit,
     onImportBvids: (String) -> Unit,
+    onImportShareLink: (String) -> Unit,
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
     onOpenInput: (String) -> Unit,
@@ -90,6 +91,7 @@ fun Sidebar(
     var showSeason by remember { mutableStateOf(false) }
     var showInput by remember { mutableStateOf(false) }
     var showBvImport by remember { mutableStateOf(false) }
+    var showShareImport by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -221,6 +223,10 @@ fun Sidebar(
                         showImportMenu = false
                         showBvImport = true
                     }
+                    ImportMenuItem("从分享链接导入歌单") {
+                        showImportMenu = false
+                        showShareImport = true
+                    }
                 }
             }
         }
@@ -249,6 +255,20 @@ fun Sidebar(
             onConfirm = { text ->
                 if (text.isNotBlank()) onOpenInput(text.trim())
                 showInput = false
+            },
+        )
+    }
+
+    if (showShareImport) {
+        BmDialog(
+            title = "从分享链接导入",
+            hint = "粘贴别人分享的歌单链接（以 bm://pl/ 开头）。导入会新建一个歌单，不会动你现有的歌单。",
+            onDismiss = { showShareImport = false },
+            confirmText = "导入",
+            multiline = true,
+            onConfirm = { text ->
+                if (text.isNotBlank()) onImportShareLink(text.trim())
+                showShareImport = false
             },
         )
     }

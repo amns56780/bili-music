@@ -22,6 +22,7 @@ import com.bilimusic.app.domain.model.ImportReport
 import com.bilimusic.app.domain.model.PlaylistSourceType
 import com.bilimusic.app.domain.model.SongDraft
 import com.bilimusic.app.util.BiliLinkParser
+import com.bilimusic.app.util.PlaylistShareCodec
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
@@ -341,6 +342,43 @@ class ImportRepositoryImpl @Inject constructor(
 
     override fun importByVideoInput(rawInput: String): Flow<ImportProgress> = flow {
         emit(ImportProgress.Preparing("正在解析输入内容…"))
+
+        // 歌单分享链接（bm://pl/v1/…）：解码出 bvid 列表后整单导入。
+        // 协议见 shared 的 PlaylistShareCodec，和桌面端共用同一份编解码。
+        val shared = PlaylistShareCodec.decode(rawInput)
+        if (shared != null) {
+            val title = shared.t.ifBlank { "分享的歌单" }
+            emit(ImportProgress.Preparing("正在导入「" + title + "」…"))
+            val playlistId = obtainPlaylist(title, PlaylistSourceType.MANUAL, "share:" + title)
+            val counters = Counters()
+            var firstCover: String? = null
+            shared.s.forEachIndexed { index, bvid ->
+                emit(
+                    ImportProgress.Working(
+                        current = index + 1,
+                        total = shared.s.size,
+                        message = "第 " + (index + 1) + " 首 · " + bvid,
+                    ),
+                )
+                when (val detail = fetchDetail(bvid)) {
+                    is DetailResult.Ok -> {
+                        val draft = detail.data.toDraft()
+                        when (addSong(playlistId, draft)) {
+                            AddSongsOutcome.Inserted -> counters.success++
+                            AddSongsOutcome.Duplicate -> counters.duplicate++
+                        }
+                        if (firstCover == null) firstCover = draft.coverUrl
+                    }
+
+                    DetailResult.Invalid -> counters.invalid++
+                    is DetailResult.Failed -> counters.failed++
+                }
+            }
+            finishPlaylist(playlistId, firstCover)
+            emit(ImportProgress.Finished(counters.toReport(playlistId, title)))
+            return@flow
+        }
+
         val ref = resolveVideoRef(rawInput)
         if (ref == null) {
             emit(ImportProgress.Failed("没认出 BV 号 / AV 号 / 链接，请检查粘贴内容"))
