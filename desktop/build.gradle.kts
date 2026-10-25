@@ -58,7 +58,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "bilimusic"
-            packageVersion = "1.1.0"
+            packageVersion = "1.1.2"
             description = "B站音源桌面音乐播放器"
             vendor = "amns56780"
             copyright = "MIT License"

@@ -24,7 +24,8 @@ $stage = Join-Path $repoRoot 'desktop\build\exe-staging'
 $distDir = Join-Path $repoRoot 'desktop\build\distributions'
 $outExe = Join-Path $distDir 'bilimusic-setup.exe'
 $iconSrc = Join-Path $repoRoot 'desktop\src\main\resources\icons\bilimusic.ico'
-$toolsDir = Join-Path (Split-Path $repoRoot -Parent) '.tools\7zip-extracted'
+# 7-Zip 独立工具集放在项目根目录的 tools\7zip-extracted 下（不在系统里安装）
+$toolsDir = Join-Path (Split-Path $repoRoot -Parent) 'tools\7zip-extracted'
 $sevenZip = Join-Path $toolsDir '7z.exe'
 $sfxModule = Join-Path $toolsDir '7z.sfx'
 $gbk = [System.Text.Encoding]::GetEncoding(936)
