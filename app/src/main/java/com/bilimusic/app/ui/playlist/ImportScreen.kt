@@ -59,7 +59,7 @@ import com.bilimusic.app.ui.components.EmptyState
 import com.bilimusic.app.ui.components.ErrorState
 import com.bilimusic.app.ui.components.LoadingState
 
-private val tabs = listOf("收藏夹", "稍后再看", "UP主投稿", "链接导入")
+private val tabs = listOf("收藏", "稍后", "UP主", "链接")
 
 /**
  * FR-7 页面 3：导入页。4 个来源各一个 Tab。

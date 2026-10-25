@@ -2,6 +2,7 @@ package com.bilimusic.app.ui.playlist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -280,6 +282,7 @@ fun PlaylistDetailScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<Song?>(null) }
+    var showCoverPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -350,6 +353,13 @@ fun PlaylistDetailScreen(
                                 onClick = {
                                     showMoreMenu = false
                                     showRenameDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("设置封面") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showCoverPicker = true
                                 },
                             )
                             DropdownMenuItem(
@@ -489,6 +499,79 @@ fun PlaylistDetailScreen(
             state = target,
             onPick = { id, title -> viewModel.applyBatchTarget(id, title) },
             onDismiss = viewModel::closeBatchTarget,
+        )
+    }
+
+    if (showCoverPicker) {
+        AlertDialog(
+            onDismissRequest = { showCoverPicker = false },
+            title = { Text("设置歌单封面") },
+            text = {
+                Column {
+                    Text(
+                        text = "从歌单里的曲目选一张视频封面当歌单封面",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.clearCover()
+                                        showCoverPicker = false
+                                    }
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.MusicNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text("恢复默认封面")
+                            }
+                        }
+                        items(
+                            uiState.songs.filter { !it.coverUrl.isNullOrBlank() },
+                            key = { it.id },
+                        ) { song ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.setCoverFromSong(song)
+                                        showCoverPicker = false
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                            ) {
+                                AsyncImage(
+                                    model = song.coverUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)),
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = song.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCoverPicker = false }) { Text("关闭") }
+            },
         )
     }
 

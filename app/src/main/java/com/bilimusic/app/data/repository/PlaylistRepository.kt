@@ -255,8 +255,8 @@ class PlaylistRepositoryImpl @Inject constructor(
     ): Playlist? = playlistDao.findBySource(type, sourceId)?.toDomain()
 
     override suspend fun updatePlaylistCover(playlistId: Long, coverUrl: String?) {
-        if (coverUrl.isNullOrBlank()) return
-        playlistDao.updateCover(playlistId, coverUrl)
+        // null / 空串 = 恢复默认封面（歌单列表会用首首曲目的封面兜底显示）
+        playlistDao.updateCover(playlistId, coverUrl?.takeIf { it.isNotBlank() })
     }
 
     override suspend fun markImported(playlistId: Long, at: Long) {

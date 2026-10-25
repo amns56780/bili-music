@@ -305,6 +305,27 @@ class PlaylistDetailViewModel @Inject constructor(
         }
     }
 
+    /** 用歌单里某首歌的视频封面作为歌单封面（对齐桌面端的「从歌单视频选封面」） */
+    fun setCoverFromSong(song: Song) {
+        viewModelScope.launch {
+            val cover = song.coverUrl
+            if (cover.isNullOrBlank()) {
+                _events.send(PlaylistDetailEvent.Message("这首歌没有封面，换一首试试"))
+            } else {
+                repository.updatePlaylistCover(playlistId, cover)
+                _events.send(PlaylistDetailEvent.Message("封面已更新"))
+            }
+        }
+    }
+
+    /** 恢复默认封面 */
+    fun clearCover() {
+        viewModelScope.launch {
+            repository.updatePlaylistCover(playlistId, null)
+            _events.send(PlaylistDetailEvent.Message("已恢复默认封面"))
+        }
+    }
+
     fun renamePlaylist(rawTitle: String) {
         val title = rawTitle.trim()
         viewModelScope.launch {
