@@ -59,7 +59,7 @@ import com.bilimusic.app.ui.components.EmptyState
 import com.bilimusic.app.ui.components.ErrorState
 import com.bilimusic.app.ui.components.LoadingState
 
-private val tabs = listOf("收藏夹", "稍后再看", "UP主投稿", "合集")
+private val tabs = listOf("收藏夹", "稍后再看", "UP主投稿", "链接导入")
 
 /**
  * FR-7 页面 3：导入页。4 个来源各一个 Tab。
@@ -370,19 +370,22 @@ private fun VideoTab(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("合集 / 分P", style = MaterialTheme.typography.titleMedium)
+        Text("链接导入", style = MaterialTheme.typography.titleMedium)
         Text(
-            text = "粘贴合集里任意一集的 BV 号、AV 号或分享链接，App 会自动识别它所属的合集并拉取全部集数；" +
-                "如果是多 P 视频，则导入全部分 P；都不是的话就当单曲导入。",
+            text = "把下面任意一种内容粘贴进来，App 会自动识别：\n" +
+                "· 单曲：BV 号 / AV 号 / 视频链接 / b23.tv 短链\n" +
+                "· 合集：合集里任意一集的链接（会拉取该合集全部集数）\n" +
+                "· 多 P 视频：导入全部分 P\n" +
+                "· 歌单分享链接：以 bm://pl/ 开头，会新建一个歌单并导入其中的歌曲",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
             value = uiState.videoInput,
             onValueChange = viewModel::onVideoInputChange,
-            label = { Text("BV 号 / AV 号 / 分享链接") },
-            placeholder = { Text("BV1xx411c7mD 或 https://b23.tv/xxxxxx") },
-            minLines = 2,
+            label = { Text("BV 号 / AV 号 / 视频链接 / 歌单分享链接") },
+            placeholder = { Text("BV1xx411c7mD\nhttps://b23.tv/xxxxxx\nbm://pl/v1/…") },
+            minLines = 3,
             enabled = !uiState.running,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -391,7 +394,13 @@ private fun VideoTab(
             enabled = uiState.canImportVideo,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (uiState.videoInput.isBlank()) "请先粘贴 BV 号 / 链接" else "导入这个合集 / 分P")
+            Text(
+                when {
+                    uiState.videoInput.isBlank() -> "请先粘贴内容"
+                    uiState.videoInput.trim().startsWith("bm://pl/") -> "导入这个歌单"
+                    else -> "导入"
+                },
+            )
         }
     }
 }
