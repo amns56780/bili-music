@@ -80,6 +80,14 @@ class PlaybackController(
     /** 重新加载完成后要跳转到的位置（拖动进度条但当时没有活动媒体时记下来） */
     private var pendingSeekMs: Long? = null
 
+    /**
+     * 用户操作序号。兜底检查（resume 1.2s / seek 1.8s 后）会先比对这个序号：
+     * 期间用户又点过任何按钮就放弃兜底 —— 否则「用户主动暂停」会被误判成
+     * 「resume 失败」，反手把媒体重建掉（播放位置还会归零）。
+     */
+    @Volatile
+    private var userActionSeq = 0
+
     private companion object {
         const val TAG = "DesktopPlayback"
         /** 进度回写节流：VLC 每秒回调多次，太频繁会让 UI 抖动 */
@@ -234,6 +242,8 @@ class PlaybackController(
     // ---------------- 控制 ----------------
 
     fun togglePlayPause() {
+        userActionSeq++
+        val seq = userActionSeq
         // VLC 里已经没有可操作的媒体（播放中断/停止后）→ resume() 是空操作，
         // 表现为「点播放没反应」。这种情况下直接重新加载当前曲目。
         if (!player.hasActiveMedia()) {
@@ -255,6 +265,8 @@ class PlaybackController(
             // 1.2 秒后如果还没真正播起来，就重建媒体（重新取流）。
             scope.launch {
                 kotlinx.coroutines.delay(1200)
+                // ★ 这期间用户又按过（最常见就是又点了一下暂停）→ 不是 resume 失败，别重建
+                if (seq != userActionSeq) return@launch
                 if (!_state.value.playing && _state.value.current != null && !_state.value.loading) {
                     AppLog.w(TAG, "resume 后仍未播放，自动重建媒体")
                     retryCurrent()
@@ -277,25 +289,32 @@ class PlaybackController(
 
     fun seekTo(positionMs: Long) {
         val target = positionMs.coerceIn(0L, _state.value.durationMs)
+        if (_state.value.current == null) return
         // 没有活动媒体时 setTime 无效，UI 上表现为「拖动后又跳回去」。
         // 记下目标位置，重新加载完成后再跳过去。
         if (!player.hasActiveMedia()) {
-            if (_state.value.current == null) return
             AppLog.w(TAG, "没有活动媒体，记录待跳转位置 " + target + "ms 并重新加载")
             pendingSeekMs = target
             retryCurrent()
             return
         }
         player.seekTo(target)
-        // 兜底：媒体卡死时 setTime 也会静默失败（UI 上就是「拖动后跳回去」）。
-        // 1.5 秒后位置没跟上就重建媒体，并跳到目标位置。
+        // ★ 乐观更新：VLC 的 timeChanged 是异步的，等它回来之前 UI 会继续用旧位置，
+        //   滑块就「弹回去」。这里立刻把位置写成目标值，滑块停在用户拖到的位置。
+        _state.value = _state.value.copy(positionMs = target)
+        userActionSeq++
+        val seq = userActionSeq
+        AppLog.i(TAG, "seek -> " + target + "ms")
         scope.launch {
-            kotlinx.coroutines.delay(1500)
+            kotlinx.coroutines.delay(1800)
+            // 这期间用户又拖/又按 → 以最后一次操作为准，跳过本次判定
+            if (seq != userActionSeq) return@launch
+            // 暂停状态下 timeChanged 不触发，无法判定 seek 是否生效；交给播放时的看门狗
+            if (!_state.value.playing) return@launch
             val pos = _state.value.positionMs
-            if (_state.value.current != null && !_state.value.loading &&
-                kotlin.math.abs(pos - target) > 5000
-            ) {
-                AppLog.w(TAG, "seek 无效（当前位置 " + pos + "，目标 " + target + "），重新加载")
+            // 播放中正常 seek 后位置应该在「目标 + 1.8s」附近；差得太远才认为真的失败
+            if (kotlin.math.abs(pos - target) > 20000) {
+                AppLog.w(TAG, "seek 未生效（目标 " + target + "，当前 " + pos + "），重建媒体并跳到目标")
                 pendingSeekMs = target
                 retryCurrent()
             }
