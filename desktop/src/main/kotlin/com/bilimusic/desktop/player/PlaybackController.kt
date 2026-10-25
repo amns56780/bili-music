@@ -184,12 +184,13 @@ class PlaybackController(
 
     fun playQueue(tracks: List<Track>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
+        val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
         shuffleOrder = if (_state.value.mode == PlayMode.SHUFFLE) {
-            tracks.indices.shuffled()
+            // 用户点的那首排第一，其余随机
+            listOf(safeIndex) + tracks.indices.filter { it != safeIndex }.shuffled()
         } else {
             tracks.indices.toList()
         }
-        val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
         interruptionRetries = 0
         pendingSeekMs = null
         _state.value = _state.value.copy(queue = tracks, index = safeIndex, positionMs = 0L, durationMs = 0L)
@@ -433,11 +434,19 @@ class PlaybackController(
     }
 
     fun setMode(mode: PlayMode) {
-        _state.value = _state.value.copy(mode = mode, message = "播放模式：${mode.displayName}")
+        _state.value = _state.value.copy(mode = mode, message = "播放模式：" + mode.displayName)
+        val queue = _state.value.queue
+        val current = _state.value.index
         shuffleOrder = if (mode == PlayMode.SHUFFLE) {
-            _state.value.queue.indices.shuffled()
+            if (queue.isEmpty() || current !in queue.indices) {
+                queue.indices.shuffled()
+            } else {
+                // 当前这首歌排在第一位，其余随机：当前歌播完后才进入随机顺序，
+                // 不会出现「刚切到随机，下一首又跳回列表开头或立刻重复当前歌」
+                listOf(current) + queue.indices.filter { it != current }.shuffled()
+            }
         } else {
-            _state.value.queue.indices.toList()
+            queue.indices.toList()
         }
     }
 
@@ -547,6 +556,19 @@ class PlaybackController(
         }
     }
 
+    /**
+     * 随机模式下一轮播完时重新洗牌。
+     *
+     * 把刚播完的那首排到最后，其余随机 —— 这样新一轮不会立刻重复刚听过的歌。
+     */
+    private fun reshuffleForNextRound() {
+        val queue = _state.value.queue
+        if (queue.isEmpty()) return
+        val current = _state.value.index
+        val others = queue.indices.filter { it != current }.shuffled()
+        shuffleOrder = if (current in queue.indices) others + current else others
+    }
+
     private suspend fun advance(manual: Boolean) {
         val queue = _state.value.queue
         if (queue.isEmpty()) return
@@ -559,6 +581,13 @@ class PlaybackController(
 
             _state.value.mode == PlayMode.REPEAT_ALL -> {
                 AppLog.i(TAG, "列表循环：回到第一首")
+                playAt(_orderedIndex(0))
+            }
+
+            _state.value.mode == PlayMode.SHUFFLE -> {
+                // 随机播放是「无限随机」：一轮播完重新洗牌接着放，不自动停止
+                AppLog.i(TAG, "随机播放：一轮播完，重新洗牌继续")
+                reshuffleForNextRound()
                 playAt(_orderedIndex(0))
             }
 

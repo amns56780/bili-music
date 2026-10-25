@@ -255,7 +255,9 @@ class PlaybackConnection @Inject constructor(
     private suspend fun applyPlayMode(mediaController: MediaController, mode: PlayMode) {
         mediaController.shuffleModeEnabled = mode == PlayMode.SHUFFLE
         mediaController.repeatMode = when (mode) {
-            PlayMode.SEQUENTIAL, PlayMode.SHUFFLE -> Player.REPEAT_MODE_OFF
+            // 随机播放是「无限随机」：一轮播完继续循环，不自动停止（与桌面端行为一致）
+            PlayMode.SHUFFLE -> Player.REPEAT_MODE_ALL
+            PlayMode.SEQUENTIAL -> Player.REPEAT_MODE_OFF
             PlayMode.REPEAT_ALL -> Player.REPEAT_MODE_ALL
             PlayMode.REPEAT_ONE -> Player.REPEAT_MODE_ONE
         }
