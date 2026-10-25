@@ -125,6 +125,59 @@ class PlaybackController(
         player.onInterrupted = { reason ->
             scope.launch { handleInterruption(reason) }
         }
+        startPlaybackWatchdog()
+    }
+
+    /**
+     * 播放看门狗。
+     *
+     * VLC 偶尔会进入「状态是 playing，但既不出声、进度也不走」的假死：
+     * 音频输出被别的程序独占、流卡在缓冲、暂停后 resume 的竞态，都可能触发。
+     * 这种情况下 VLC 不会发 error，也没有 stopped，前面那些兜底一个都不会动。
+     *
+     * 这里每 2 秒采样一次：播放中且位置连续 6 秒没前进 → 认为假死，
+     * 重建媒体并回到原位置（最多连续 3 次，超过就提示用户手动切歌）。
+     */
+    private fun startPlaybackWatchdog() {
+        scope.launch {
+            var lastPos = -1L
+            var stuckTicks = 0
+            while (true) {
+                kotlinx.coroutines.delay(2000)
+                val s = _state.value
+                if (!s.playing || s.current == null || s.loading) {
+                    stuckTicks = 0
+                    lastPos = -1L
+                    continue
+                }
+                if (s.positionMs == lastPos) {
+                    stuckTicks++
+                    if (stuckTicks >= 3) {
+                        stuckTicks = 0
+                        lastPos = -1L
+                        if (interruptionRetries >= MAX_INTERRUPTION_RETRIES) {
+                            AppLog.e(TAG, "播放假死且自动重试已达上限：" + s.current?.title)
+                            _state.value = _state.value.copy(
+                                message = "播放卡住了，点下一首或重新播放试试",
+                            )
+                        } else {
+                            interruptionRetries++
+                            val resumeAt = s.positionMs
+                            AppLog.w(
+                                TAG,
+                                "播放假死（位置 " + resumeAt + "ms 连续 6 秒未前进），第 " +
+                                    interruptionRetries + " 次重建媒体",
+                            )
+                            if (resumeAt > 3000) pendingSeekMs = resumeAt
+                            retryCurrent()
+                        }
+                    }
+                } else {
+                    stuckTicks = 0
+                }
+                lastPos = s.positionMs
+            }
+        }
     }
 
     // ---------------- 队列 ----------------
@@ -268,8 +321,18 @@ class PlaybackController(
                 // ★ 这期间用户又按过（最常见就是又点了一下暂停）→ 不是 resume 失败，别重建
                 if (seq != userActionSeq) return@launch
                 if (!_state.value.playing && _state.value.current != null && !_state.value.loading) {
-                    AppLog.w(TAG, "resume 后仍未播放，自动重建媒体")
-                    retryCurrent()
+                    // 先重试一次 resume —— VLC 暂停/恢复之间有竞态，重发一次往往就好了，
+                    // 比重建媒体轻得多（不重取流、播放位置也不会丢）
+                    AppLog.w(TAG, "resume 未生效，重试一次")
+                    player.resume()
+                    kotlinx.coroutines.delay(800)
+                    if (seq == userActionSeq && !_state.value.playing) {
+                        val resumeAt = _state.value.positionMs
+                        AppLog.w(TAG, "resume 重试仍无效，自动重建媒体（保留位置 " + resumeAt + "ms）")
+                        // ★ 重建后回到原来的播放位置，而不是从头开始
+                        if (resumeAt > 3000) pendingSeekMs = resumeAt
+                        retryCurrent()
+                    }
                 }
             }
         }
