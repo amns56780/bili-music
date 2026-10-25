@@ -45,6 +45,9 @@ class ImportService(
         const val PAGE_SIZE = 20
         /** 单次导入的翻页上限，防止误点把几千首一次拉完 */
         const val MAX_PAGES = 50
+
+        /** 一次「按 BV 号导入」最多处理多少个，避免误粘贴一大段文本把接口刷爆 */
+        const val MAX_BV_IMPORT = 50
     }
 
     fun consumeError() {
@@ -283,6 +286,84 @@ class ImportService(
         }
     }
 
+    /**
+     * 按 BV 号 / 链接导入歌曲（不依赖收藏夹，想加哪首加哪首）。
+     *
+     * 支持一次粘贴多条：换行、空格、逗号、分号都能分隔；b23.tv 短链会自动展开。
+     * 解析失败的汇总到 error 里提示，歌单里已有的自动跳过。
+     */
+    fun importByBvids(text: String, playlistId: Long, playlistTitle: String) {
+        scope.launch {
+            val tokens = text.split(Regex("[\\s,，;；|]+"))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            if (tokens.isEmpty()) {
+                _progress.value = ImportProgress(error = "请输入 BV 号或视频链接")
+                return@launch
+            }
+            val targets = tokens.take(MAX_BV_IMPORT)
+            _progress.value = ImportProgress(
+                running = true,
+                text = "正在解析 " + targets.size + " 个视频…",
+                total = targets.size,
+            )
+            val songs = mutableListOf<NewSong>()
+            val failed = mutableListOf<String>()
+            targets.forEachIndexed { index, token ->
+                var bvid = BiliLinkParser.parseBvid(token)
+                if (bvid == null) {
+                    BiliLinkParser.findShortLink(token)?.let { short ->
+                        bvid = client.shortLinkResolver.resolve(short)
+                            ?.let { BiliLinkParser.parseFromResolvedUrl(it) }
+                    }
+                }
+                if (bvid == null) {
+                    failed += token.take(20)
+                    return@forEachIndexed
+                }
+                client.requestThrottle.await()
+                val signed = client.wbiSigner.sign(mapOf("bvid" to bvid))
+                when (val result = apiCall(maxAttempts = 1) { client.api.videoView(signed) }) {
+                    is ApiResult.Success -> {
+                        val data = result.data
+                        if (data.cid <= 0L) {
+                            failed += bvid + "（无音轨）"
+                        } else {
+                            songs += NewSong(
+                                bvid = data.bvid.ifBlank { bvid },
+                                cid = data.cid,
+                                title = data.title.ifBlank { bvid },
+                                artist = data.owner?.name.orEmpty(),
+                                coverUrl = data.pic,
+                                durationMs = data.duration * 1000L,
+                            )
+                        }
+                    }
+                    is ApiResult.Error -> failed += bvid + "（" + result.failure.userMessage + "）"
+                }
+                _progress.value = _progress.value.copy(
+                    text = "正在解析：" + (index + 1) + "/" + targets.size,
+                    current = index + 1,
+                )
+            }
+            val added = if (songs.isEmpty()) 0 else store.addSongs(playlistId, songs)
+            val duplicates = songs.size - added
+            val summary = buildString {
+                append("已添加 ")
+                append(added)
+                append(" 首到「")
+                append(playlistTitle)
+                append("」")
+                if (duplicates > 0) append("，跳过重复 " + duplicates + " 首")
+            }
+            _progress.value = ImportProgress(
+                text = summary,
+                error = if (failed.isEmpty()) null else
+                    "有 " + failed.size + " 个没导入：" + failed.take(3).joinToString("、") +
+                        (if (failed.size > 3) " 等" else ""),
+            )
+        }
+    }
     /** 逐条补齐 cid（带节流与进度） */
     private suspend fun resolveCids(songs: List<NewSong>, title: String): List<NewSong> {
         val out = mutableListOf<NewSong>()

@@ -445,6 +445,18 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     app.importer.importToView()
                                 }
                             },
+                            onImportBvids = { text ->
+                                val pid = selectedPlaylistId
+                                if (pid == null) {
+                                    playback.reportError("请先在左侧选择一个歌单，再按 BV 号导入")
+                                } else {
+                                    app.importer.importByBvids(
+                                        text,
+                                        pid,
+                                        playlists.firstOrNull { it.id == pid }?.title.orEmpty(),
+                                    )
+                                }
+                            },
                             onDismissFavPicker = { favFolders = emptyList() },
                             onConsumeProgressError = app.importer::consumeError,
                             onPlayPlaylist = { index ->

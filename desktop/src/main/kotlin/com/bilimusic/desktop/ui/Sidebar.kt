@@ -79,6 +79,7 @@ fun Sidebar(
     onImportToView: () -> Unit,
     onImportSeason: (String) -> Unit,
     onImportSpace: (String) -> Unit,
+    onImportBvids: (String) -> Unit,
     onDismissFavPicker: () -> Unit,
     onConsumeProgressError: () -> Unit,
     onOpenInput: (String) -> Unit,
@@ -88,6 +89,7 @@ fun Sidebar(
     var showImportMenu by remember { mutableStateOf(false) }
     var showSeason by remember { mutableStateOf(false) }
     var showInput by remember { mutableStateOf(false) }
+    var showBvImport by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -215,6 +217,10 @@ fun Sidebar(
                         showImportMenu = false
                         showSeason = true
                     }
+                    ImportMenuItem("按 BV 号 / 链接导入歌曲") {
+                        showImportMenu = false
+                        showBvImport = true
+                    }
                 }
             }
         }
@@ -243,6 +249,25 @@ fun Sidebar(
             onConfirm = { text ->
                 if (text.isNotBlank()) onOpenInput(text.trim())
                 showInput = false
+            },
+        )
+    }
+
+    if (showBvImport) {
+        val target = playlists.firstOrNull { it.id == selectedId }
+        BmDialog(
+            title = "按 BV 号导入",
+            hint = if (target != null) {
+                "每行一个 BV 号或视频链接（也可以一次粘贴多个，用空格/逗号分隔）\n导入到「" + target.title + "」"
+            } else {
+                "请先在左侧选择一个歌单，再执行导入"
+            },
+            onDismiss = { showBvImport = false },
+            confirmText = "导入",
+            multiline = true,
+            onConfirm = { text ->
+                if (text.isNotBlank()) onImportBvids(text.trim())
+                showBvImport = false
             },
         )
     }
@@ -510,6 +535,7 @@ fun BmDialog(
     onConfirm: (String) -> Unit,
     hint: String = "",
     initial: String = "",
+    multiline: Boolean = false,
 ) {
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
@@ -527,7 +553,9 @@ fun BmDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    singleLine = true,
+                    singleLine = !multiline,
+                    minLines = if (multiline) 6 else 1,
+                    maxLines = if (multiline) 10 else 1,
                     placeholder = { Text(title, style = BmType.bodySm) },
                     modifier = Modifier.fillMaxWidth(),
                 )
