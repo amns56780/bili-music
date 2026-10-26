@@ -100,10 +100,13 @@ fun HomeScreen(
     onDeletePlaylist: (Long) -> Unit,
     onSetCoverUrl: (Long, String?) -> Unit,
     onSetCoverFile: (Long) -> Unit,
+    immersive: ImmersiveState,
+    onPickImmersiveImage: () -> Unit,
 ) {
     androidx.compose.runtime.LaunchedEffect(selectedPlaylist?.id, playlists.size) {
         println("[BmDebug] selectedPlaylist=" + selectedPlaylist?.id + " playlists=" + playlists.size + " songs=" + songs.size)
     }
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().background(BmColors.bg)) {
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             Sidebar(
@@ -181,7 +184,24 @@ fun HomeScreen(
             onDownload = onDownload,
             onStartSleep = onStartSleep,
             onCancelSleep = onCancelSleep,
+            onCoverClick = { if (playback.current != null) immersive.open = true },
         )
+    }
+
+    // 沉浸听歌模式（覆盖整个窗口，自下而上滑入）
+    ImmersivePlayer(
+        visible = immersive.open,
+        state = playback,
+        cover = cover,
+        controller = controller,
+        onClose = { immersive.open = false },
+        bgMode = immersive.bgMode,
+        customBgPath = immersive.customBgPath,
+        onBgModeChange = { immersive.bgMode = it },
+        onPickImage = onPickImmersiveImage,
+        showWave = immersive.showWave,
+        onToggleWave = { immersive.showWave = !immersive.showWave },
+    )
     }
 
     if (showLocalMusic) {

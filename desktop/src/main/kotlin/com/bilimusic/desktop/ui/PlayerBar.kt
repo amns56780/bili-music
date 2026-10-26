@@ -83,6 +83,8 @@ fun PlayerBar(
     onDownload: () -> Unit,
     onStartSleep: (Int) -> Unit,
     onCancelSleep: () -> Unit,
+    /** 点封面进入沉浸听歌模式 */
+    onCoverClick: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier
@@ -95,12 +97,19 @@ fun PlayerBar(
         // ---------------- 左：当前曲目 ----------------
         Row(modifier = Modifier.width(330.dp), verticalAlignment = Alignment.CenterVertically) {
             val current = state.current
-            BmCover(
-                cover = cover,
-                seed = current?.title ?: "♪",
-                size = BmDimens.coverPlayer,
-                radius = 9.dp,
-            )
+            Box(
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                    .clickable(enabled = current != null) { onCoverClick() }
+                    .pointerHoverIcon(PointerIcon.Hand),
+            ) {
+                BmCover(
+                    cover = cover,
+                    seed = current?.title ?: "♪",
+                    size = BmDimens.coverPlayer,
+                    radius = 9.dp,
+                )
+            }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

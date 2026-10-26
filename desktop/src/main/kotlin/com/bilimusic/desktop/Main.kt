@@ -402,6 +402,8 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                         }
                         var favFolders by remember { mutableStateOf<List<FavFolderDto>>(emptyList()) }
                         var showLocalMusic by remember { mutableStateOf(false) }
+                        // 沉浸听歌模式的状态（背景 / 律动开关）；本次会话内有效
+                        val immersiveState = remember { com.bilimusic.desktop.ui.ImmersiveState() }
                         val localMusicState by app.localMusic.state.collectAsState()
                         val sleepState by app.sleepTimer.state.collectAsState()
                         val downloadState by app.downloads.state.collectAsState()
@@ -617,6 +619,20 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     }.onFailure {
                                         playback.reportError("设置封面失败：" + (it.message ?: "未知错误"))
                                     }
+                                }
+                            },
+                            immersive = immersiveState,
+                            onPickImmersiveImage = {
+                                val chooser = javax.swing.JFileChooser().apply {
+                                    dialogTitle = "选择沉浸模式背景图片"
+                                    fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+                                        "图片 (*.png;*.jpg;*.jpeg;*.webp;*.bmp)",
+                                        "png", "jpg", "jpeg", "webp", "bmp",
+                                    )
+                                }
+                                if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                    immersiveState.customBgPath = chooser.selectedFile.absolutePath
+                                    immersiveState.bgMode = com.bilimusic.desktop.ui.ImmersiveBackground.IMAGE
                                 }
                             },
                         )

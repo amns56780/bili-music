@@ -1,0 +1,439 @@
+package com.bilimusic.desktop.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bilimusic.desktop.player.PlaybackController
+import com.bilimusic.desktop.player.PlaybackUiState
+import com.bilimusic.desktop.ui.theme.BmColors
+import com.bilimusic.desktop.ui.theme.BmType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import javax.imageio.ImageIO
+import kotlin.math.PI
+import kotlin.math.sin
+import kotlin.random.Random
+
+/** 沉浸模式的运行时状态（由 Main 持有，可持久化到 settings） */
+class ImmersiveState {
+    var open by mutableStateOf(false)
+    var bgMode by mutableStateOf(ImmersiveBackground.WALLPAPER)
+    var customBgPath by mutableStateOf<String?>(null)
+    var showWave by mutableStateOf(true)
+}
+
+/** 沉浸模式的背景来源 */
+enum class ImmersiveBackground(val label: String) {
+    WALLPAPER("桌面壁纸"),
+    IMAGE("自定义图片"),
+    SOLID("纯色"),
+}
+
+/**
+ * 沉浸听歌模式：点底部播放条的封面，自下而上整屏弹出。
+ *
+ * 只保留最低限度的信息：歌名 / 艺术家 / 播放进度 / 进入沉浸模式的时间与已听时长，
+ * 外加可选的一排随音乐律动的线条。背景可以是桌面壁纸（模糊处理）、
+ * 自己选的图片，或者纯色。
+ */
+@Composable
+fun ImmersivePlayer(
+    visible: Boolean,
+    state: PlaybackUiState,
+    cover: ImageBitmap?,
+    controller: PlaybackController,
+    onClose: () -> Unit,
+    bgMode: ImmersiveBackground,
+    customBgPath: String?,
+    onBgModeChange: (ImmersiveBackground) -> Unit,
+    onPickImage: () -> Unit,
+    showWave: Boolean,
+    onToggleWave: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+    ) {
+        val blurred = rememberBlurredBackground(bgMode, customBgPath)
+        val enteredAt = remember { System.currentTimeMillis() }
+        var now by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(visible) {
+            while (visible) {
+                now = System.currentTimeMillis()
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+        var showBgMenu by remember { mutableStateOf(false) }
+
+        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0C))) {
+            // ---------------- 背景 ----------------
+            when (bgMode) {
+                ImmersiveBackground.SOLID -> {
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(listOf(Color(0xFF1B1B22), Color(0xFF0A0A0C))),
+                        ),
+                    )
+                }
+
+                else -> {
+                    if (blurred != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = blurred,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+            // 压暗 + 顶部/底部渐变，保证文字可读
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xCC000000), Color(0x66000000), Color(0xE6000000)),
+                    ),
+                ),
+            )
+
+            // ---------------- 右上角操作 ----------------
+            Row(
+                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RoundIconButton(
+                    icon = Icons.Filled.Settings,
+                    contentDescription = "背景设置",
+                    onClick = { showBgMenu = !showBgMenu },
+                )
+                RoundIconButton(
+                    icon = Icons.Filled.Close,
+                    contentDescription = "退出沉浸模式",
+                    onClick = onClose,
+                )
+            }
+
+            // 背景设置弹层
+            if (showBgMenu) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 72.dp, end = 20.dp)
+                        .width(200.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xEE1C1C22))
+                        .padding(vertical = 6.dp),
+                ) {
+                    ImmersiveBackground.entries.forEach { mode ->
+                        TextRow(
+                            label = mode.label,
+                            selected = mode == bgMode,
+                            onClick = {
+                                onBgModeChange(mode)
+                                if (mode == ImmersiveBackground.IMAGE) onPickImage()
+                                showBgMenu = false
+                            },
+                        )
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x33FFFFFF)))
+                    TextRow(
+                        label = if (showWave) "隐藏律动线条" else "显示律动线条",
+                        selected = false,
+                        onClick = {
+                            onToggleWave()
+                            showBgMenu = false
+                        },
+                    )
+                }
+            }
+
+            // ---------------- 主内容 ----------------
+            val current = state.current
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.weight(1f))
+
+                // 大封面
+                BmCover(
+                    cover = cover,
+                    seed = current?.title ?: "♪",
+                    size = 260.dp,
+                    radius = 20.dp,
+                )
+
+                Spacer(Modifier.height(34.dp))
+
+                Text(
+                    text = current?.title ?: "还没有在播放",
+                    style = BmType.titleL.copy(fontSize = 30.sp),
+                    color = Color.White,
+                    maxLines = 2,
+                    textAlign = TextAlign.Center,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(0.8f),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = current?.artist?.ifBlank { "未知UP主" } ?: "",
+                    style = BmType.body,
+                    color = Color(0xB3FFFFFF),
+                )
+
+                Spacer(Modifier.height(30.dp))
+
+                // 进度
+                val duration = state.durationMs.coerceAtLeast(1L)
+                val ratio = (state.positionMs.toFloat() / duration).coerceIn(0f, 1f)
+                Column(modifier = Modifier.width(560.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(0x33FFFFFF)),
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(ratio).height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFFEC4141)),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            text = formatMs(state.positionMs) + " / " + formatMs(state.durationMs),
+                            style = BmType.number,
+                            color = Color(0xCCFFFFFF),
+                        )
+                        Text(
+                            text = formatClock(enteredAt) + " 进入 · 已听 " +
+                                formatElapsed(now - enteredAt),
+                            style = BmType.number,
+                            color = Color(0x99FFFFFF),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(28.dp))
+
+                // 播放控制
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RoundIconButton(Icons.Filled.SkipPrevious, "上一首", iconSize = 26.dp) { controller.previous() }
+                    Box(
+                        modifier = Modifier.size(58.dp).clip(CircleShape)
+                            .background(Color(0xFFEC4141))
+                            .clickable { controller.togglePlayPause() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (state.playing) "暂停" else "播放",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp),
+                        )
+                    }
+                    RoundIconButton(Icons.Filled.SkipNext, "下一首", iconSize = 26.dp) { controller.next() }
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                // 底部律动线条
+                if (showWave) {
+                    WaveLine(
+                        playing = state.playing,
+                        modifier = Modifier.fillMaxWidth(0.7f).height(90.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoundIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier.size(40.dp).clip(CircleShape)
+            .background(Color(0x33000000))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(iconSize))
+    }
+}
+
+@Composable
+private fun TextRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = BmType.body,
+            color = if (selected) BmColors.brand else Color(0xE6FFFFFF),
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(BmColors.brand))
+        }
+    }
+}
+
+/** 随播放状态起伏的线条（当前是节拍近似，不是真实频谱） */
+@Composable
+private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
+    val bars = 56
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(playing) {
+        if (!playing) return@LaunchedEffect
+        var last = 0L
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { time ->
+                if (last != 0L) {
+                    phase += (time - last) / 1_000_000_000f * 2.2f
+                }
+                last = time
+            }
+        }
+    }
+    Canvas(modifier) {
+        val gap = 3.dp.toPx()
+        val w = (size.width - gap * (bars - 1)) / bars
+        for (i in 0 until bars) {
+            val norm = i.toFloat() / bars
+            val wave = sin(phase + i * 0.42f) * 0.5f + 0.5f
+            val wave2 = sin(phase * 0.7f - i * 0.21f) * 0.5f + 0.5f
+            val rand = Random(phase.toLong() * 31 + i).nextFloat()
+            val amplitude = if (playing) {
+                (wave * 0.55f + wave2 * 0.25f + rand * 0.2f).coerceIn(0.08f, 1f)
+            } else {
+                0.05f
+            }
+            val h = size.height * amplitude
+            val x = i * (w + gap)
+            drawRoundRect(
+                color = Color(0xFFEC4141).copy(alpha = 0.35f + 0.55f * amplitude),
+                topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
+                size = androidx.compose.ui.geometry.Size(w, h),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2, w / 2),
+            )
+        }
+    }
+}
+
+// ---------------- 工具 ----------------
+
+private fun formatMs(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    return (total / 60).toString() + ":" + (total % 60).toString().padStart(2, '0')
+}
+
+private fun formatClock(ms: Long): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
+
+private fun formatElapsed(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    return if (total < 60) total.toString() + " 秒" else (total / 60).toString() + " 分钟"
+}
+
+/** 读注册表里的桌面壁纸路径 */
+private fun readWallpaperPath(): String? = runCatching {
+    val proc = ProcessBuilder("reg", "query", "HKCU\\Control Panel\\Desktop", "/v", "WallPaper")
+        .redirectErrorStream(true)
+        .start()
+    val text = proc.inputStream.bufferedReader().readText()
+    proc.waitFor()
+    Regex("WallPaper\\s+REG_SZ\\s+(.+)").find(text)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+}.getOrNull()
+
+/** 把图片缩到很小的尺寸再交给 Compose 放大显示 —— 相当于一次廉价模糊 */
+private fun blurToTiny(path: String, down: Int = 48): ImageBitmap? = runCatching {
+    val src = ImageIO.read(File(path)) ?: return@runCatching null
+    val small = BufferedImage(down, down, BufferedImage.TYPE_INT_ARGB)
+    val g = small.createGraphics()
+    g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+    g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+    g.drawImage(src, 0, 0, down, down, null)
+    g.dispose()
+    small.toComposeImageBitmap()
+}.getOrNull()
+
+@Composable
+private fun rememberBlurredBackground(mode: ImmersiveBackground, customPath: String?): ImageBitmap? {
+    var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(mode, customPath) {
+        bitmap = withContext(Dispatchers.IO) {
+            when (mode) {
+                ImmersiveBackground.SOLID -> null
+                ImmersiveBackground.IMAGE -> customPath?.let { blurToTiny(it) }
+                ImmersiveBackground.WALLPAPER -> blurToTiny(readWallpaperPath() ?: return@withContext null)
+            }
+        }
+    }
+    return bitmap
+}
+
