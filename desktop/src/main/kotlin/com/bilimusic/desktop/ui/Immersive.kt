@@ -1,6 +1,9 @@
 package com.bilimusic.desktop.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -144,7 +147,7 @@ fun ImmersivePlayer(
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
-                        listOf(Color(0xCC000000), Color(0x66000000), Color(0xE6000000)),
+                        listOf(Color(0x99000000), Color(0x44000000), Color(0xC8000000)),
                     ),
                 ),
             )
@@ -269,12 +272,26 @@ fun ImmersivePlayer(
 
                 Spacer(Modifier.height(28.dp))
 
-                // 播放控制
+                // 播放控制：每个按钮都是固定尺寸的 Box，点击范围严格等于按钮本身，
+                // 不能靠 Row 的排列去撑开（之前整行可点，导致点左右空白也会切歌）
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RoundIconButton(Icons.Filled.SkipPrevious, "上一首", iconSize = 26.dp) { controller.previous() }
+                    Box(
+                        modifier = Modifier.size(56.dp).clip(CircleShape)
+                            .clickable { controller.previous() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.SkipPrevious,
+                            contentDescription = "上一首",
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(18.dp))
                     Box(
                         modifier = Modifier.size(58.dp).clip(CircleShape)
                             .background(Color(0xFFEC4141))
@@ -288,7 +305,19 @@ fun ImmersivePlayer(
                             modifier = Modifier.size(30.dp),
                         )
                     }
-                    RoundIconButton(Icons.Filled.SkipNext, "下一首", iconSize = 26.dp) { controller.next() }
+                    Spacer(Modifier.width(18.dp))
+                    Box(
+                        modifier = Modifier.size(56.dp).clip(CircleShape)
+                            .clickable { controller.next() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.SkipNext,
+                            contentDescription = "下一首",
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
                 }
 
                 Spacer(Modifier.weight(1f))
@@ -343,18 +372,29 @@ private fun TextRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 随播放状态起伏的线条（当前是节拍近似，不是真实频谱） */
+/**
+ * 随播放状态起伏的线条（节拍近似，不是真实频谱）。
+ *
+ * 平滑性靠两点：
+ * - 波形用三组不同频率的正弦叠加，不再用 Random（每帧随机会让条子抖动）
+ * - 整体幅度用 animateFloatAsState 过渡，播放/暂停时是渐入渐出而不是瞬间跳变
+ */
 @Composable
 private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
     val bars = 56
     var phase by remember { mutableFloatStateOf(0f) }
+    val level by animateFloatAsState(
+        targetValue = if (playing) 1f else 0f,
+        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        label = "waveLevel",
+    )
     LaunchedEffect(playing) {
         if (!playing) return@LaunchedEffect
         var last = 0L
         while (true) {
             androidx.compose.runtime.withFrameNanos { time ->
                 if (last != 0L) {
-                    phase += (time - last) / 1_000_000_000f * 2.2f
+                    phase += (time - last) / 1_000_000_000f * 1.5f
                 }
                 last = time
             }
@@ -364,19 +404,16 @@ private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
         val gap = 3.dp.toPx()
         val w = (size.width - gap * (bars - 1)) / bars
         for (i in 0 until bars) {
-            val norm = i.toFloat() / bars
-            val wave = sin(phase + i * 0.42f) * 0.5f + 0.5f
-            val wave2 = sin(phase * 0.7f - i * 0.21f) * 0.5f + 0.5f
-            val rand = Random(phase.toLong() * 31 + i).nextFloat()
-            val amplitude = if (playing) {
-                (wave * 0.55f + wave2 * 0.25f + rand * 0.2f).coerceIn(0.08f, 1f)
-            } else {
-                0.05f
-            }
+            val wave1 = sin(phase + i * 0.32f) * 0.5f + 0.5f
+            val wave2 = sin(phase * 0.63f - i * 0.19f) * 0.5f + 0.5f
+            val wave3 = sin(phase * 1.17f + i * 0.85f) * 0.5f + 0.5f
+            val shape = (wave1 * 0.5f + wave2 * 0.3f + wave3 * 0.2f).coerceIn(0f, 1f)
+            // 静止时保留一条很矮的基线，运动时叠加 level 过渡
+            val amplitude = 0.06f + 0.94f * shape * level
             val h = size.height * amplitude
             val x = i * (w + gap)
             drawRoundRect(
-                color = Color(0xFFEC4141).copy(alpha = 0.35f + 0.55f * amplitude),
+                color = Color(0xFFEC4141).copy(alpha = 0.30f + 0.60f * amplitude),
                 topLeft = androidx.compose.ui.geometry.Offset(x, size.height - h),
                 size = androidx.compose.ui.geometry.Size(w, h),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(w / 2, w / 2),
@@ -410,16 +447,34 @@ private fun readWallpaperPath(): String? = runCatching {
     Regex("WallPaper\\s+REG_SZ\\s+(.+)").find(text)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
 }.getOrNull()
 
-/** 把图片缩到很小的尺寸再交给 Compose 放大显示 —— 相当于一次廉价模糊 */
-private fun blurToTiny(path: String, down: Int = 48): ImageBitmap? = runCatching {
-    val src = ImageIO.read(File(path)) ?: return@runCatching null
-    val small = BufferedImage(down, down, BufferedImage.TYPE_INT_ARGB)
-    val g = small.createGraphics()
-    g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-    g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-    g.drawImage(src, 0, 0, down, down, null)
-    g.dispose()
-    small.toComposeImageBitmap()
+/**
+ * 高斯模糊背景（Skia 的 ImageFilter.makeBlur）。
+ *
+ * 之前的做法是缩到 48x48 再由 Compose 放大 —— 那是"马赛克式的糊"，不是毛玻璃。
+ * 这里直接让 Skia 做真正的高斯卷积：先按目标宽度缩放（控制耗时），
+ * 再用 sigma≈60 的模糊滤镜绘制到离屏 Surface 上。
+ */
+private fun gaussianBlur(path: String, sigma: Float = 38f, maxWidth: Int = 1600): ImageBitmap? = runCatching {
+    val bytes = File(path).readBytes()
+    val skImage = org.jetbrains.skia.Image.makeFromEncoded(bytes)
+    if (skImage.width <= 0 || skImage.height <= 0) return@runCatching null
+    val w = minOf(maxWidth, skImage.width)
+    val h = (skImage.height.toFloat() * w / skImage.width).toInt().coerceAtLeast(1)
+    val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(w, h)
+    val paint = org.jetbrains.skia.Paint().apply {
+        imageFilter = org.jetbrains.skia.ImageFilter.makeBlur(
+            sigma,
+            sigma,
+            org.jetbrains.skia.FilterTileMode.CLAMP,
+            null,
+        )
+    }
+    surface.canvas.drawImageRect(
+        skImage,
+        org.jetbrains.skia.Rect.makeWH(w.toFloat(), h.toFloat()),
+        paint,
+    )
+    surface.makeImageSnapshot().toComposeImageBitmap()
 }.getOrNull()
 
 @Composable
@@ -429,8 +484,8 @@ private fun rememberBlurredBackground(mode: ImmersiveBackground, customPath: Str
         bitmap = withContext(Dispatchers.IO) {
             when (mode) {
                 ImmersiveBackground.SOLID -> null
-                ImmersiveBackground.IMAGE -> customPath?.let { blurToTiny(it) }
-                ImmersiveBackground.WALLPAPER -> blurToTiny(readWallpaperPath() ?: return@withContext null)
+                ImmersiveBackground.IMAGE -> customPath?.let { gaussianBlur(it) }
+                ImmersiveBackground.WALLPAPER -> gaussianBlur(readWallpaperPath() ?: return@withContext null)
             }
         }
     }
