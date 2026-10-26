@@ -391,6 +391,11 @@ class PlaybackController(
      * [persist] 为 false 时只下发不写盘 —— 拖动过程中每 50ms 调一次，
      * 避免每帧写 settings.json。
      */
+    /** 把当前音量写进设置（拖动结束后调用；setVolume(persist=false) 已经实时改了 state） */
+    fun persistVolume() {
+        runCatching { settings?.putString(KEY_VOLUME, _state.value.volume.toString()) }
+    }
+
     fun setVolume(volume: Int, persist: Boolean = true) {
         val ui = volume.coerceIn(0, 100)
         _state.value = _state.value.copy(volume = ui)

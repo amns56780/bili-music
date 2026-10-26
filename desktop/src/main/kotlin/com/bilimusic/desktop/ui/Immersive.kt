@@ -46,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -124,6 +125,11 @@ fun ImmersivePlayer(
         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
     ) {
+        // 沉浸模式期间才采集频谱（避免平时白占 CPU）
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            com.bilimusic.desktop.player.AudioSpectrum.start()
+            onDispose { com.bilimusic.desktop.player.AudioSpectrum.stop() }
+        }
         val blurred = rememberBlurredBackground(bgMode, customBgPath)
         val enteredAt = remember { System.currentTimeMillis() }
         var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -270,7 +276,7 @@ fun ImmersivePlayer(
                         onChange = { v ->
                             controller.setVolume((v * 100f).toInt().coerceIn(0, 100), persist = false)
                         },
-                        onFinished = { controller.setVolume(state.volume, persist = true) },
+                        onFinished = { controller.persistVolume() },
                         modifier = Modifier.weight(1f),
                         hoverBarColor = Color.White,
                     )
@@ -505,44 +511,35 @@ private fun TextRow(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 随播放状态起伏的线条（节拍近似，不是真实频谱）。
+ * 真实的音频频谱（WASAPI 环回采集 + FFT，见 AudioSpectrum）。
  *
- * 平滑性靠两点：
- * - 波形用三组不同频率的正弦叠加，不再用 Random（每帧随机会让条子抖动）
- * - 整体幅度用 animateFloatAsState 过渡，播放/暂停时是渐入渐出而不是瞬间跳变
+ * 32 个对数频段线性插值成 56 根柱子，每根的高度就是当前时刻该频段的能量。
+ * 播放/暂停整体幅度用 animateFloatAsState 过渡，避免一暂停就瞬间掉平。
  */
 @Composable
 private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
     val bars = 56
-    var phase by remember { mutableFloatStateOf(0f) }
+    val spectrum by com.bilimusic.desktop.player.AudioSpectrum.bands.collectAsState()
     val level by animateFloatAsState(
         targetValue = if (playing) 1f else 0f,
         animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
         label = "waveLevel",
     )
-    LaunchedEffect(playing) {
-        if (!playing) return@LaunchedEffect
-        var last = 0L
-        while (true) {
-            androidx.compose.runtime.withFrameNanos { time ->
-                if (last != 0L) {
-                    phase += (time - last) / 1_000_000_000f * 1.5f
-                }
-                last = time
-            }
-        }
-    }
     Canvas(modifier) {
         val gap = 3.dp.toPx()
         val w = (size.width - gap * (bars - 1)) / bars
+        val bandCount = com.bilimusic.desktop.player.AudioSpectrum.BANDS
         for (i in 0 until bars) {
-            val wave1 = sin(phase + i * 0.32f) * 0.5f + 0.5f
-            val wave2 = sin(phase * 0.63f - i * 0.19f) * 0.5f + 0.5f
-            val wave3 = sin(phase * 1.17f + i * 0.85f) * 0.5f + 0.5f
-            val shape = (wave1 * 0.5f + wave2 * 0.3f + wave3 * 0.2f).coerceIn(0f, 1f)
+            // 32 段 → 56 根，线性插值
+            val srcPos = i.toFloat() / (bars - 1) * (bandCount - 1)
+            val i0 = srcPos.toInt().coerceIn(0, bandCount - 1)
+            val i1 = (i0 + 1).coerceAtMost(bandCount - 1)
+            val frac = srcPos - i0
+            val energy = (spectrum.getOrElse(i0) { 0f } * (1f - frac) +
+                spectrum.getOrElse(i1) { 0f } * frac).coerceIn(0f, 1f)
             // 静止时保留一条很矮的基线，运动时叠加 level 过渡
-            val amplitude = 0.06f + 0.94f * shape * level
-            val h = size.height * amplitude
+            val amplitude = 0.06f + 0.94f * energy * level
+            val h = (size.height * amplitude).coerceAtLeast(1f)
             val x = i * (w + gap)
             drawRoundRect(
                 color = Color(0xFFEC4141).copy(alpha = 0.30f + 0.60f * amplitude),
