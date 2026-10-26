@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Repeat
@@ -131,6 +134,7 @@ fun ImmersivePlayer(
             }
         }
         var showBgMenu by remember { mutableStateOf(false) }
+        var showVolume by remember { mutableStateOf(false) }
         // 切换播放模式后短暂显示模式名
         var modeTip by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(state.mode) {
@@ -186,6 +190,21 @@ fun ImmersivePlayer(
                 ),
             )
 
+            // ---------------- 左上角：时间 / 日期 / 星期 ----------------
+            Column(modifier = Modifier.align(Alignment.TopStart).padding(28.dp)) {
+                Text(
+                    text = formatClock(now),
+                    style = BmType.number.copy(fontSize = 42.sp),
+                    color = Color.White,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = formatDateWithWeek(now),
+                    style = BmType.bodySm,
+                    color = Color(0x99FFFFFF),
+                )
+            }
+
             // ---------------- 右上角操作 ----------------
             Row(
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
@@ -199,6 +218,15 @@ fun ImmersivePlayer(
                     iconSize = 20.dp,
                     background = Color(0x33000000),
                     onClick = { controller.cycleMode() },
+                )
+                // 音量：点击展开滑块
+                ImmersiveButton(
+                    icon = immersiveVolumeIcon(state.volume),
+                    contentDescription = "音量",
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                    background = Color(0x33000000),
+                    onClick = { showVolume = !showVolume },
                 )
                 ImmersiveButton(
                     icon = Icons.Filled.Settings,
@@ -216,6 +244,45 @@ fun ImmersivePlayer(
                     background = Color(0x33000000),
                     onClick = onClose,
                 )
+            }
+
+            // 音量弹层
+            if (showVolume) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 72.dp, end = 20.dp)
+                        .width(280.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xEE1C1C22))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = immersiveVolumeIcon(state.volume),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    BmSlider(
+                        value = state.volume / 100f,
+                        onChange = { v ->
+                            controller.setVolume((v * 100f).toInt().coerceIn(0, 100), persist = false)
+                        },
+                        onFinished = { controller.setVolume(state.volume, persist = true) },
+                        modifier = Modifier.weight(1f),
+                        hoverBarColor = Color.White,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = state.volume.toString(),
+                        style = BmType.number,
+                        color = Color(0xCCFFFFFF),
+                        modifier = Modifier.width(28.dp),
+                        textAlign = TextAlign.End,
+                    )
+                }
             }
 
             // 背景设置弹层
@@ -488,6 +555,15 @@ private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
 }
 
 // ---------------- 工具 ----------------
+
+private fun immersiveVolumeIcon(volume: Int) = when {
+    volume <= 0 -> Icons.Filled.VolumeOff
+    volume < 50 -> Icons.Filled.VolumeDown
+    else -> Icons.Filled.VolumeUp
+}
+
+private fun formatDateWithWeek(ms: Long): String =
+    java.text.SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date(ms))
 
 private fun immersiveModeIcon(mode: com.bilimusic.app.domain.model.PlayMode) =
     when (mode) {
