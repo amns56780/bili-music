@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +31,11 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.RepeatOne
+import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +52,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,8 +126,31 @@ fun ImmersivePlayer(
             }
         }
         var showBgMenu by remember { mutableStateOf(false) }
+        // 切换播放模式后短暂显示模式名
+        var modeTip by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(state.mode) {
+            modeTip = state.mode.displayName
+            kotlinx.coroutines.delay(2000)
+            modeTip = null
+        }
 
         Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0C))) {
+            // ---------------- 点击拦截层 ----------------
+            // 铺满整屏、吞掉所有落空的点击。它声明在内容之前（z 序更低），
+            // 所以按钮等控件仍然优先命中；只有空白区域的点击会被这一层吃掉，
+            // 不会再"穿透"到别的控件上导致误切歌。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        // 空白处点击：关闭可能展开的背景菜单，别的什么也不做
+                        showBgMenu = false
+                    },
+            )
+
             // ---------------- 背景 ----------------
             when (bgMode) {
                 ImmersiveBackground.SOLID -> {
@@ -157,14 +186,29 @@ fun ImmersivePlayer(
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                RoundIconButton(
+                // 播放模式切换（顺序 / 列表循环 / 单曲循环 / 随机）
+                ImmersiveButton(
+                    icon = immersiveModeIcon(state.mode),
+                    contentDescription = "播放模式：" + state.mode.displayName,
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                    background = Color(0x33000000),
+                    onClick = { controller.cycleMode() },
+                )
+                ImmersiveButton(
                     icon = Icons.Filled.Settings,
                     contentDescription = "背景设置",
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                    background = Color(0x33000000),
                     onClick = { showBgMenu = !showBgMenu },
                 )
-                RoundIconButton(
+                ImmersiveButton(
                     icon = Icons.Filled.Close,
                     contentDescription = "退出沉浸模式",
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                    background = Color(0x33000000),
                     onClick = onClose,
                 )
             }
@@ -272,52 +316,39 @@ fun ImmersivePlayer(
 
                 Spacer(Modifier.height(28.dp))
 
-                // 播放控制：每个按钮都是固定尺寸的 Box，点击范围严格等于按钮本身，
-                // 不能靠 Row 的排列去撑开（之前整行可点，导致点左右空白也会切歌）
+                // 播放控制：每个按钮独立固定尺寸，点击范围严格等于按钮本身
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        modifier = Modifier.size(56.dp).clip(CircleShape)
-                            .clickable { controller.previous() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SkipPrevious,
-                            contentDescription = "上一首",
-                            tint = Color.White,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(18.dp))
-                    Box(
-                        modifier = Modifier.size(58.dp).clip(CircleShape)
-                            .background(Color(0xFFEC4141))
-                            .clickable { controller.togglePlayPause() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (state.playing) "暂停" else "播放",
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(18.dp))
-                    Box(
-                        modifier = Modifier.size(56.dp).clip(CircleShape)
-                            .clickable { controller.next() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SkipNext,
-                            contentDescription = "下一首",
-                            tint = Color.White,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
+                    ImmersiveButton(
+                        icon = Icons.Filled.SkipPrevious,
+                        contentDescription = "上一首",
+                    ) { controller.previous() }
+                    Spacer(Modifier.width(16.dp))
+                    ImmersiveButton(
+                        icon = if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (state.playing) "暂停" else "播放",
+                        size = 58.dp,
+                        iconSize = 30.dp,
+                        background = Color(0xFFEC4141),
+                    ) { controller.togglePlayPause() }
+                    Spacer(Modifier.width(16.dp))
+                    ImmersiveButton(
+                        icon = Icons.Filled.SkipNext,
+                        contentDescription = "下一首",
+                    ) { controller.next() }
+                }
+
+                // 模式切换提示（切换后 2 秒内显示当前模式名）
+                if (modeTip != null) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = modeTip!!,
+                        style = BmType.label,
+                        color = Color(0x99FFFFFF),
+                    )
                 }
 
                 Spacer(Modifier.weight(1f))
@@ -335,20 +366,34 @@ fun ImmersivePlayer(
     }
 }
 
+/**
+ * 固定尺寸的圆形按钮。
+ *
+ * 用 pointerInput + detectTapGestures 而不是 clickable：前者只按 Box 的实际尺寸做
+ * 命中测试，后者在某些父布局下会被 Compose 的"最小触摸目标"放大，导致点击范围
+ * 超出按钮（沉浸模式里表现为点空白也切歌）。
+ */
 @Composable
-private fun RoundIconButton(
+private fun ImmersiveButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
-    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
+    size: androidx.compose.ui.unit.Dp = 56.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 26.dp,
+    background: Color = Color.Transparent,
+    tint: Color = Color.White,
     onClick: () -> Unit,
 ) {
     Box(
-        modifier = Modifier.size(40.dp).clip(CircleShape)
-            .background(Color(0x33000000))
-            .clickable(onClick = onClick),
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(background)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onClick() })
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(iconSize))
+        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(iconSize))
     }
 }
 
@@ -423,6 +468,14 @@ private fun WaveLine(playing: Boolean, modifier: Modifier = Modifier) {
 }
 
 // ---------------- 工具 ----------------
+
+private fun immersiveModeIcon(mode: com.bilimusic.app.domain.model.PlayMode) =
+    when (mode) {
+        com.bilimusic.app.domain.model.PlayMode.SEQUENTIAL -> Icons.AutoMirrored.Outlined.PlaylistPlay
+        com.bilimusic.app.domain.model.PlayMode.REPEAT_ALL -> Icons.Outlined.Repeat
+        com.bilimusic.app.domain.model.PlayMode.REPEAT_ONE -> Icons.Outlined.RepeatOne
+        com.bilimusic.app.domain.model.PlayMode.SHUFFLE -> Icons.Outlined.Shuffle
+    }
 
 private fun formatMs(ms: Long): String {
     val total = (ms / 1000).coerceAtLeast(0)
