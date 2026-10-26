@@ -10,6 +10,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +55,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -341,11 +346,11 @@ fun ImmersivePlayer(
                     ) { controller.next() }
                 }
 
-                // 模式切换提示（切换后 2 秒内显示当前模式名）
-                if (modeTip != null) {
-                    Spacer(Modifier.height(10.dp))
+                // 模式切换提示：固定高度占位（无提示时留空），避免显示/隐藏时把整个界面顶动
+                Spacer(Modifier.height(10.dp))
+                Box(modifier = Modifier.height(20.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        text = modeTip!!,
+                        text = modeTip ?: "",
                         style = BmType.label,
                         color = Color(0x99FFFFFF),
                     )
@@ -383,17 +388,32 @@ private fun ImmersiveButton(
     tint: Color = Color.White,
     onClick: () -> Unit,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    // 悬停反馈：透明底的按钮浮一层淡淡的白色；有底色（品牌红）的按钮稍微压暗一点
+    val bg = when {
+        background == Color.Transparent -> if (hovered) Color(0x22FFFFFF) else Color.Transparent
+        hovered -> background.copy(alpha = 0.86f)
+        else -> background
+    }
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(background)
+            .background(bg)
+            .hoverable(interaction)
+            .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon.Hand)
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { onClick() })
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(iconSize))
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = if (hovered) Color.White else tint,
+            modifier = Modifier.size(iconSize),
+        )
     }
 }
 
