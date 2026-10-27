@@ -152,7 +152,9 @@ class PlaybackController(
                 }
                 if (s.positionMs == lastPos) {
                     stuckTicks++
-                    if (stuckTicks >= 3) {
+                    // 12 秒（6 个 2 秒 tick）才判定假死：之前 6 秒太激进，
+                    // 网络抖动几秒就被当成假死重建，反而更卡
+                    if (stuckTicks >= 6) {
                         stuckTicks = 0
                         lastPos = -1L
                         if (interruptionRetries >= MAX_INTERRUPTION_RETRIES) {
@@ -165,7 +167,7 @@ class PlaybackController(
                             val resumeAt = s.positionMs
                             AppLog.w(
                                 TAG,
-                                "播放假死（位置 " + resumeAt + "ms 连续 6 秒未前进），第 " +
+                                "播放假死（位置 " + resumeAt + "ms 连续 12 秒未前进），第 " +
                                     interruptionRetries + " 次重建媒体",
                             )
                             if (resumeAt > 3000) pendingSeekMs = resumeAt
