@@ -35,6 +35,7 @@ import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import com.bilimusic.app.data.player.AudioQualityProvider
 import com.bilimusic.app.data.player.StreamUrlRepository
@@ -81,7 +82,6 @@ fun main() {
     // 否则会出现多个托盘图标 + 多份播放（Windows 强杀进程还会留下残留图标）。
     if (!SingleInstance.acquire()) return
     application {
-    val windowState = rememberWindowState(size = DpSize(1240.dp, 860.dp))
     var windowVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val trayState = rememberTrayState()
@@ -90,6 +90,33 @@ fun main() {
 
     // 应用级依赖建在 application 作用域，托盘菜单才能直接控制播放
     val app = rememberDesktopApp(scope)
+
+    // 窗口几何：首次启动居中，之后继承上一次关闭时的位置与大小
+    // （存 "x,y,w,h" 四个整数；坐标是 dp）
+    val windowState = rememberWindowState(
+        position = run {
+            val parts = parseWindowGeometry(app.storage.getString(KEY_WINDOW_GEOMETRY))
+            if (parts != null) WindowPosition(parts[0].dp, parts[1].dp) else WindowPosition(Alignment.Center)
+        },
+        size = run {
+            val parts = parseWindowGeometry(app.storage.getString(KEY_WINDOW_GEOMETRY))
+            if (parts != null) DpSize(parts[2].dp, parts[3].dp) else DpSize(1240.dp, 860.dp)
+        },
+    )
+
+    // 位置/大小变化 500ms 后落盘（LaunchedEffect 的 key 变化会取消上一次，天然防抖）
+    androidx.compose.runtime.LaunchedEffect(windowState.position, windowState.size, windowVisible) {
+        if (!windowVisible) return@LaunchedEffect
+        kotlinx.coroutines.delay(500)
+        val x = windowState.position.x.value.toInt()
+        val y = windowState.position.y.value.toInt()
+        val w = windowState.size.width.value.toInt()
+        val h = windowState.size.height.value.toInt()
+        // 最小化时 Windows 会把窗口位置挪到 -32000 附近，这种值不能保存
+        if (x > -30000 && y > -30000 && w > 300 && h > 300) {
+            app.storage.putString(KEY_WINDOW_GEOMETRY, "$x,$y,$w,$h")
+        }
+    }
 
     // 第二个实例启动时会把 "show" 发过来，这里响应成「把窗口显示出来」
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -642,6 +669,18 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
         }
     }
 }
+
+/** 窗口几何 "x,y,w,h" 解析；全部为整数且宽高合理才认 */
+private fun parseWindowGeometry(raw: String?): List<Int>? {
+    if (raw == null) return null
+    val parts = raw.split(",").mapNotNull { it.trim().toIntOrNull() }
+    if (parts.size != 4) return null
+    if (parts[2] < 300 || parts[3] < 300) return null
+    if (parts[0] < -30000 || parts[1] < -30000) return null
+    return parts
+}
+
+private const val KEY_WINDOW_GEOMETRY = "window.geometry"
 
 /** 主题 + 全局图片加载上下文（封面图需要带 Referer 的 OkHttpClient） */
 @Composable
