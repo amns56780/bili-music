@@ -42,15 +42,14 @@ class VlcPlayer {
         // 会被静默忽略 —— 请求不带 Referer/UA，B 站 CDN 直接 403，表现为「这个地址播不了」。
         "--http-referrer=" + BiliHeaderInterceptor.REFERER,
         "--http-user-agent=" + BiliHeaderInterceptor.USER_AGENT,
-        // 网络缓冲。之前是 300ms：起播快，但网络稍有抖动就断流 → 播放一卡一卡、
-        // 卡到看门狗触发重建，用户看到"进度跳回去"。B 站音频码率不高（~200KB/s），
-        // 3 秒缓冲只有几百 KB，换来的是抖动 3 秒内完全无感。
-        "--network-caching=3000",
+        // 网络缓冲。实测踩坑：
+        //   300ms  → 偶发假死（缓冲太小，抖动就断流）
+        //   3000ms → 每首歌 11 秒左右必假死（VLC 3.0 的 http 流在长缓冲下
+        //            读满一段后不再续读，播放到缓冲末尾就停住）
+        // 1000ms 是实测的稳定值。
+        "--network-caching=1000",
         // 本地文件也留一点缓冲，避免磁盘/解码抖动
         "--file-caching=1000",
-        // B 站 CDN 偶发会掐断长连接（表现为播放假死）。让 VLC 自己重连，
-        // 比上层重建媒体快得多，也不会打断音频输出。
-        "--http-reconnect",
         // Explicit low-latency Windows audio output module (falls back automatically)
         "--aout=mmdevice",
     )
