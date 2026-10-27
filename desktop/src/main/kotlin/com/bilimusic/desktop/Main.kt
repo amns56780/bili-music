@@ -75,9 +75,25 @@ fun main() {
     // （纯英文文件名的却能播，表现极具迷惑性）。
     // JNA 在 Native 类初始化时读取这个属性，所以必须在创建 VlcPlayer 之前设好。
     System.setProperty("jna.encoding", "UTF-8")
+    // 便携版内置了 VLC（vlc/ 目录）：优先用它，找不到则回退系统安装的 VLC。
+    // 必须在任何 JNA/VLC 调用之前设置 jna.library.path —— JNA 的 Native 类
+    // 在初始化时就读取该属性，之后再设无效。
+    val builtinVlcDir = runCatching {
+        val appDir = java.io.File(System.getProperty("user.dir"))
+        val builtinVlc = java.io.File(appDir, "vlc")
+        if (builtinVlc.isDirectory && java.io.File(builtinVlc, "libvlc.dll").isFile) {
+            System.setProperty("jna.library.path", builtinVlc.absolutePath)
+            builtinVlc.absolutePath
+        } else {
+            null
+        }
+    }.getOrNull()
     // 安装版是 javaw（没有控制台），stdout 等于黑洞 —— 所有日志同时写进
     // ~/.bilimusic/app.log，否则「突然没声音了」这类反馈完全没有现场可查。
     setupFileLogging()
+    if (builtinVlcDir != null) {
+        com.bilimusic.app.util.AppLog.i("Main", "使用内置 VLC：" + builtinVlcDir)
+    }
     // 单实例保护：已有实例在跑时，通知它把窗口显示出来，然后本进程直接退出。
     // 否则会出现多个托盘图标 + 多份播放（Windows 强杀进程还会留下残留图标）。
     if (!SingleInstance.acquire()) return

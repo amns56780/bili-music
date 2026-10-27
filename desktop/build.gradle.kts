@@ -83,6 +83,22 @@ val portableDist by tasks.registering(Sync::class) {
     into(portableRoot)
     from(configurations.runtimeClasspath.get()) { into("lib") }
     from(tasks.named("jar")) { into("lib") }
+    // 内置 VLC 核心：便携版不依赖系统安装的 VLC
+    // （只带 libvlc/libvlccore + plugins，不带 vlc.exe；约 80MB）
+    val vlcHome = System.getenv("VLC_HOME") ?: "C:/Program Files/VideoLAN/VLC"
+    val vlcDir = file(vlcHome)
+    if (vlcDir.isDirectory) {
+        from(vlcDir) {
+            include("libvlc.dll", "libvlccore.dll", "plugins/**")
+            // plugins.dat 是 VLC 的插件索引缓存，里面记着原机器的文件时间戳；
+            // 复制到新位置后必然 stale，VLC 会打一堆 error 再重建。干脆不带，让它首启重建。
+            exclude("plugins/plugins.dat")
+            into("vlc")
+        }
+        doFirst { logger.lifecycle("bundling VLC from " + vlcDir.absolutePath) }
+    } else {
+        doFirst { logger.lifecycle("VLC not found at " + vlcDir.absolutePath + " — portable build will require system VLC") }
+    }
 }
 
 val portableLauncher by tasks.registering {
@@ -103,7 +119,8 @@ val portableLauncher by tasks.registering {
 
             运行前请确认：
               1) 已安装 JRE / JDK 17 或更高版本（java 在 PATH 里）
-              2) 已安装 VLC（https://www.videolan.org）—— 播放内核依赖它
+
+            本便携版已内置 VLC 播放内核（vlc/ 目录），无需另外安装 VLC。
 
             启动：双击 bilimusic.bat
 
