@@ -59,6 +59,60 @@ class DownloadService(
     )
     val state: StateFlow<DownloadUiState> = _state.asStateFlow()
 
+    /**
+     * 流缓存目录：播放前把整首下载到这里，播本地文件就不会被网络抖动打断。
+     * 与 downloads/ 分开：这里是"听过就缓存"，不进下载列表、不占用户可见的下载记录。
+     */
+    private val cacheDir = File(dir.parentFile ?: dir, "stream-cache")
+
+    /** 流缓存文件（没有则 null） */
+    fun cacheFileFor(bvid: String, cid: Long): File? {
+        cacheDir.listFiles()?.forEach { f ->
+            if (f.name.startsWith(bvid + "-" + cid + ".") && f.isFile && f.length() > 0) return f
+        }
+        return null
+    }
+
+    /**
+     * 播放用：把一首歌完整下载到流缓存（已缓存/已下载则直接返回路径）。
+     * 失败返回 null，调用方回退到流式播放。
+     * 不写 downloads.json、不写下载 UI 状态 —— 它只是播放侧的预取。
+     */
+    suspend fun fetchToCache(track: Track): String? = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        track.localPath?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        localFileFor(track.bvid, track.cid)?.let { return@withContext it.absolutePath }
+        cacheFileFor(track.bvid, track.cid)?.let { return@withContext it.absolutePath }
+        runCatching {
+            val stream = streamUrls.resolve(track.bvid, track.cid) ?: return@withContext null
+            val ext = when {
+                stream.mimeType.contains("flac", true) -> "flac"
+                stream.mimeType.contains("aac", true) -> "aac"
+                else -> "m4a"
+            }
+            cacheDir.mkdirs()
+            val target = File(cacheDir, track.bvid + "-" + track.cid + "." + ext)
+            val tmp = File(cacheDir, target.name + ".part")
+            val request = Request.Builder().url(stream.url).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use
+                val body = response.body ?: return@use
+                tmp.outputStream().use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n <= 0) break
+                            output.write(buffer, 0, n)
+                        }
+                    }
+                }
+            }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) return@withContext null
+            target.absolutePath
+        }.getOrNull()
+    }
+
     /** 已下载的本地文件（没有则 null） */
     fun localFileFor(bvid: String, cid: Long): File? {
         val record = _state.value.records.firstOrNull { it.bvid == bvid && it.cid == cid } ?: return null

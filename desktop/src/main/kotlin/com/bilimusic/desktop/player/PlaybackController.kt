@@ -58,6 +58,11 @@ class PlaybackController(
     private val player: VlcPlayer = VlcPlayer(),
     /** 已下载的本地文件（有则离线播放，不再取流） */
     private val downloadedFile: (bvid: String, cid: Long) -> String? = { _, _ -> null },
+    /**
+     * 播放前把整首下载到本地流缓存（避免流式播放被网络抖动打断）。
+     * 返回本地路径，失败返回 null（调用方回退到流式播放）。
+     */
+    private val fetchToCache: (suspend (Track) -> String?)? = null,
     /** Settings store: remembers the volume (otherwise it resets to 80 on every launch). */
     private val settings: com.bilimusic.app.data.remote.KeyValueStore? = null,
 ) {
@@ -279,11 +284,41 @@ class PlaybackController(
             return
         }
 
+        // 没有本地副本：先把整首下载到流缓存再播（实测流式播放会被网络抖动打断）。
+        // 5 秒内下不完就回退流式，不让用户干等。
+        val fetcher = fetchToCache
+        if (fetcher != null) {
+            scope.launch {
+                _state.value = _state.value.copy(loading = true, message = null)
+                val cached = withContext(Dispatchers.IO) {
+                    runCatching {
+                        kotlinx.coroutines.withTimeoutOrNull(5_000) { fetcher(track) }
+                    }.getOrNull()
+                }
+                if (cached != null) {
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        qualityLabel = "缓存",
+                        durationMs = if (track.durationMs > 0) track.durationMs else 0L,
+                    )
+                    withContext(Dispatchers.IO) { player.playLocalFile(cached) }
+                    prefetchUpcoming()
+                } else {
+                    playViaStream(track)
+                }
+            }
+            return
+        }
+        playViaStream(track)
+    }
+
+    /** 流式播放（缓存失败/未启用时的兜底） */
+    private fun playViaStream(track: Track) {
         scope.launch {
             _state.value = _state.value.copy(loading = true, message = null)
             val stream = withContext(Dispatchers.IO) { streamUrls.resolve(track.bvid, track.cid) }
             if (stream == null) {
-                _state.value = _state.value.copy(loading = false, message = "取流失败：${track.title}")
+                _state.value = _state.value.copy(loading = false, message = "取流失败：" + track.title)
                 return@launch
             }
             _state.value = _state.value.copy(
@@ -293,6 +328,25 @@ class PlaybackController(
             )
             withContext(Dispatchers.IO) { player.play(stream.url) }
         }
+    }
+
+    /** 后台预下载下一首：切歌时就能直接用缓存，不用等 */
+    private fun prefetchUpcoming() {
+        val fetcher = fetchToCache ?: return
+        val s = _state.value
+        val queue = s.queue
+        if (queue.isEmpty()) return
+        val nextIndex = when (s.mode) {
+            PlayMode.SEQUENTIAL, PlayMode.REPEAT_ALL -> (s.index + 1) % queue.size
+            PlayMode.REPEAT_ONE -> s.index
+            PlayMode.SHUFFLE -> {
+                if (shuffleOrder.isEmpty()) s.index
+                else _orderedIndex((orderOf(s.index) + 1) % shuffleOrder.size)
+            }
+        }
+        val next = queue.getOrNull(nextIndex) ?: return
+        if (next.localPath != null) return
+        scope.launch { runCatching { fetcher(next) } }
     }
 
     // ---------------- 控制 ----------------

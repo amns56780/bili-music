@@ -279,6 +279,8 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
             scope = scope,
             // 已下载的曲子离线播放，不再取流
             downloadedFile = { bvid, cid -> downloads.localFileFor(bvid, cid)?.absolutePath },
+            // 播放前把整首下载到流缓存，避免流式播放被网络抖动打断
+            fetchToCache = { track -> downloads.fetchToCache(track) },
         )
     }.getOrNull()
     val store = PlaylistStore()
