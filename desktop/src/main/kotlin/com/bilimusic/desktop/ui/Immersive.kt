@@ -141,6 +141,9 @@ fun ImmersivePlayer(
         }
         var showBgMenu by remember { mutableStateOf(false) }
         var showVolume by remember { mutableStateOf(false) }
+        // 进度条拖动状态：拖动时只改 draft，松手才真正 seek（避免每帧跨语言调用积压）
+        var seekDragging by remember { mutableStateOf(false) }
+        var seekDraft by remember { mutableFloatStateOf(0f) }
         // 切换播放模式后短暂显示模式名
         var modeTip by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(state.mode) {
@@ -361,25 +364,32 @@ fun ImmersivePlayer(
 
                 Spacer(Modifier.height(30.dp))
 
-                // 进度
+                // 进度（可拖动：拖动时用本地 draft，松手才 seek，和主界面播放条同一套交互）
                 val duration = state.durationMs.coerceAtLeast(1L)
-                val ratio = (state.positionMs.toFloat() / duration).coerceIn(0f, 1f)
+                val ratio = if (seekDragging) seekDraft else (state.positionMs.toFloat() / duration).coerceIn(0f, 1f)
                 Column(modifier = Modifier.width(560.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(Color(0x33FFFFFF)),
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth(ratio).height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFFEC4141)),
-                        )
-                    }
-                    Spacer(Modifier.height(10.dp))
+                    BmSlider(
+                        value = ratio,
+                        onChange = { v ->
+                            seekDragging = true
+                            seekDraft = v
+                        },
+                        onFinished = {
+                            if (state.durationMs > 0) controller.seekTo((seekDraft * state.durationMs).toLong())
+                            seekDragging = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 18.dp,
+                        barHeight = 4.dp,
+                    )
+                    Spacer(Modifier.height(6.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = formatMs(state.positionMs) + " / " + formatMs(state.durationMs),
+                            text = if (seekDragging) {
+                                formatMs((seekDraft * duration).toLong()) + " / " + formatMs(state.durationMs)
+                            } else {
+                                formatMs(state.positionMs) + " / " + formatMs(state.durationMs)
+                            },
                             style = BmType.number,
                             color = Color(0xCCFFFFFF),
                         )

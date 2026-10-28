@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,6 +119,12 @@ fun BmSlider(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val clamped = value.coerceIn(0f, 1f)
+    // ★ pointerInput(Unit) 的手势协程只会创建一次，直接引用参数会永远捕获
+    //   「第一次组合时」的 lambda —— 那时往往还没开始播放（durationMs=0），
+    //   于是松手回调里 if (durationMs > 0) 永远不成立，表现为「拖完弹回去」。
+    //   rememberUpdatedState 保证协程里拿到的始终是最新回调。
+    val currentOnChange by rememberUpdatedState(onChange)
+    val currentOnFinished by rememberUpdatedState(onFinished)
 
     Box(
         modifier = modifier
@@ -128,21 +135,21 @@ fun BmSlider(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    onChange((down.position.x / widthPx).coerceIn(0f, 1f))
+                    currentOnChange((down.position.x / widthPx).coerceIn(0f, 1f))
                     down.consume()
                     var pressed = true
                     while (pressed) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull() ?: break
                         if (change.pressed) {
-                            onChange((change.position.x / widthPx).coerceIn(0f, 1f))
+                            currentOnChange((change.position.x / widthPx).coerceIn(0f, 1f))
                             change.consume()
                         } else {
                             pressed = false
                         }
                         if (event.changes.all { !it.pressed }) pressed = false
                     }
-                    onFinished()
+                    currentOnFinished()
                 }
             },
         contentAlignment = Alignment.CenterStart,

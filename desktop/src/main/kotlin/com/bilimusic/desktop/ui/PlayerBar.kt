@@ -219,7 +219,10 @@ fun PlayerBar(
                         draft = it
                     },
                     onFinished = {
-                        if (state.durationMs > 0) controller.seekTo((draft * state.durationMs).toLong())
+                        // 读 controller 的**当前**时长：拖动回调可能来自旧组合，
+                        // 直接用捕获的 state 会拿到 durationMs=0 的初始快照
+                        val duration = controller.state.value.durationMs
+                        if (duration > 0) controller.seekTo((draft * duration).toLong())
                         dragging = false
                     },
                     modifier = Modifier.weight(1f),
