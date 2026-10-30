@@ -465,6 +465,8 @@ class PlaybackController(
      * 会写进 settings，下次启动自动应用。
      */
     fun setOutputDevice(deviceId: String?) {
+        val wasPlaying = _state.value.playing
+        val resumeAt = _state.value.positionMs
         outputDeviceId = deviceId
         if (deviceId.isNullOrBlank()) {
             player.resetOutputDevice()
@@ -472,14 +474,24 @@ class PlaybackController(
             player.setOutputDevice(deviceId)
         }
         runCatching { settings?.putString(KEY_OUTPUT_DEVICE, deviceId ?: "") }
+
+        // VLC 3 只在媒体启动时读取输出设备：播放中设置不会切到新设备（表现为
+        // 「选完还在旧设备出声，换歌才生效」）。这里重载当前曲目并回到原位置，
+        // 用一次短暂 loading 换成真正的热切换。
+        val hasCurrent = _state.value.current != null
+        if (wasPlaying && hasCurrent) {
+            pendingSeekMs = resumeAt.takeIf { it > 1500 }
+            retryCurrent()
+        }
+
         val name = runCatching {
             player.outputDevices().firstOrNull { it.deviceId == deviceId }?.longName
         }.getOrNull()
         _state.value = _state.value.copy(
-            message = if (deviceId.isNullOrBlank() || name == null) {
-                "已切换到系统默认输出设备"
-            } else {
-                "已切换到：" + name
+            message = when {
+                deviceId.isNullOrBlank() -> "已切换到系统默认输出设备"
+                name == null -> "已切换到新输出设备"
+                else -> "已切换到：" + name
             },
         )
     }
