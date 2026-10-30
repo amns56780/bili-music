@@ -41,8 +41,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.composed
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
@@ -388,4 +391,29 @@ fun BmMenuDivider() {
             .height(1.dp)
             .background(BmColors.divider),
     )
+}
+
+/**
+ * 鼠标滚轮调音量的可复用修饰符（模块化：任何界面套上它就能用滚轮微调音量）。
+ *
+ * 上滚 = -1（音量 +1%），下滚 = +1（音量 -1%），由调用方决定怎么应用。
+ * 用 rememberUpdatedState 保证手势协程拿到最新回调 —— pointerInput(Unit) 的
+ * 协程只创建一次，直接引用参数会永远捕获首次组合时的旧闭包（进度条回弹就是这个坑）。
+ */
+fun Modifier.volumeWheel(onScroll: (step: Int) -> Unit): Modifier = composed {
+    val currentOnScroll by rememberUpdatedState(onScroll)
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.type == PointerEventType.Scroll) {
+                    val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                    if (delta != 0f) {
+                        currentOnScroll(if (delta > 0f) -1 else 1)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+        }
+    }
 }

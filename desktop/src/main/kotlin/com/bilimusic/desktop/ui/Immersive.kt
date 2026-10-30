@@ -152,7 +152,16 @@ fun ImmersivePlayer(
             modeTip = null
         }
 
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0C))) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0A0C))
+                // 滚轮微调音量（±1%）：沉浸模式里没有音量条可见，滚动即可调
+                .volumeWheel { step ->
+                    val v = (controller.state.value.volume + step).coerceIn(0, 100)
+                    controller.setVolume(v, persist = true)
+                },
+        ) {
             // ---------------- 点击拦截层 ----------------
             // 铺满整屏、吞掉所有落空的点击。它声明在内容之前（z 序更低），
             // 所以按钮等控件仍然优先命中；只有空白区域的点击会被这一层吃掉，
