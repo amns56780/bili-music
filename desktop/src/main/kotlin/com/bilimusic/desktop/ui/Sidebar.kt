@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Headset
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.AlertDialog
@@ -74,6 +75,7 @@ fun Sidebar(
     onRequestLogin: () -> Unit,
     onLogout: () -> Unit,
     onOpenLocalMusic: () -> Unit,
+    onOpenOutputDevice: () -> Unit,
     onLoadFavFolders: () -> Unit,
     onImportFolder: (Long, String) -> Unit,
     onImportToView: () -> Unit,
@@ -203,6 +205,7 @@ fun Sidebar(
         // 底部入口
         Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
             SidebarAction(Icons.Outlined.FolderOpen, "本地音乐", onOpenLocalMusic)
+            SidebarAction(Icons.Outlined.Headset, "输出设备", onOpenOutputDevice)
             SidebarAction(Icons.Outlined.CloudDownload, "导入歌单", { showImportMenu = !showImportMenu })
             if (showImportMenu) {
                 Column(modifier = Modifier.padding(start = 12.dp)) {

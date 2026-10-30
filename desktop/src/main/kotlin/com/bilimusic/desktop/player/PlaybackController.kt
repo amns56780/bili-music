@@ -102,9 +102,11 @@ class PlaybackController(
 
         /** 同一首歌被中断后最多自动重连几次 */
         const val MAX_INTERRUPTION_RETRIES = 3
+        const val KEY_OUTPUT_DEVICE = "audio.outputDevice"
     }
 
     init {
+        restoreOutputDevice()
         // 恢复上次音量：直接写 Windows 音频会话（VLC 自身音量固定满幅）
         runCatching {
             settings?.getString(KEY_VOLUME)?.toIntOrNull()?.coerceIn(0, 100)?.let { ui ->
@@ -447,6 +449,50 @@ class PlaybackController(
      * [persist] 为 false 时只下发不写盘 —— 拖动过程中每 50ms 调一次，
      * 避免每帧写 settings.json。
      */
+    // ---------------- 音频输出设备 ----------------
+
+    /** 当前选中的输出设备 id（null = 系统默认） */
+    @Volatile
+    private var outputDeviceId: String? = null
+
+    /** VLC 枚举到的输出设备列表（UI 用） */
+    fun outputDevices(): List<uk.co.caprica.vlcj.player.base.AudioDevice> = player.outputDevices()
+
+    fun currentOutputDeviceId(): String? = outputDeviceId
+
+    /**
+     * 切换输出设备（运行时生效）。[deviceId] 传 null 表示恢复系统默认。
+     * 会写进 settings，下次启动自动应用。
+     */
+    fun setOutputDevice(deviceId: String?) {
+        outputDeviceId = deviceId
+        if (deviceId.isNullOrBlank()) {
+            player.resetOutputDevice()
+        } else {
+            player.setOutputDevice(deviceId)
+        }
+        runCatching { settings?.putString(KEY_OUTPUT_DEVICE, deviceId ?: "") }
+        val name = runCatching {
+            player.outputDevices().firstOrNull { it.deviceId == deviceId }?.longName
+        }.getOrNull()
+        _state.value = _state.value.copy(
+            message = if (deviceId.isNullOrBlank() || name == null) {
+                "已切换到系统默认输出设备"
+            } else {
+                "已切换到：" + name
+            },
+        )
+    }
+
+    /** 启动时从设置恢复输出设备（不弹提示） */
+    private fun restoreOutputDevice() {
+        val saved = runCatching { settings?.getString(KEY_OUTPUT_DEVICE) }.getOrNull()
+        if (!saved.isNullOrBlank()) {
+            outputDeviceId = saved
+            player.setOutputDevice(saved)
+        }
+    }
+
     /** 把当前音量写进设置（拖动结束后调用；setVolume(persist=false) 已经实时改了 state） */
     fun persistVolume() {
         runCatching { settings?.putString(KEY_VOLUME, _state.value.volume.toString()) }

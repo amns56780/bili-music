@@ -60,6 +60,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.bilimusic.app.domain.model.PlayMode
 import com.bilimusic.desktop.player.PlaybackController
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.Headset
 import com.bilimusic.desktop.ui.theme.BmColors
 import com.bilimusic.desktop.ui.theme.BmDimens
 import com.bilimusic.desktop.ui.theme.BmType
@@ -85,6 +87,8 @@ fun PlayerBar(
     onCancelSleep: () -> Unit,
     /** 点封面进入沉浸听歌模式 */
     onCoverClick: () -> Unit = {},
+    /** 打开输出设备选择 */
+    onOpenOutputDevice: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier
@@ -241,27 +245,20 @@ fun PlayerBar(
         LaunchedEffect(state.volume) { wheelVolume = state.volume }
         Row(
             modifier = Modifier
-                .width(280.dp)
-                // 滚轮调音量：在音量图标/滑条/数字这一片区域滚动即可，步进 1%
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
-                                val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                                if (delta != 0f) {
-                                    val step = if (delta > 0f) -1 else 1
-                                    wheelVolume = (wheelVolume + step).coerceIn(0, 100)
-                                    controller.setVolume(wheelVolume, persist = true)
-                                    event.changes.forEach { it.consume() }
-                                }
-                            }
-                        }
-                    }
-                },
+                // 容纳：音量组 + 设备按钮 + 定时 + 队列
+                .width(350.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.End,
         ) {
+            // 音量组：滚轮只绑在这一小块上（之前绑在整行，把右边按钮的点击全吃掉了）
+            Row(
+                modifier = Modifier
+                    .volumeWheel { step ->
+                        val v = (controller.state.value.volume + step).coerceIn(0, 100)
+                        controller.setVolume(v, persist = true)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             var volumeDragging by remember { mutableStateOf(false) }
             var volumeDraft by remember { mutableStateOf(state.volume) }
             var lastVolumeSentAt by remember { mutableStateOf(0L) }
@@ -302,7 +299,16 @@ fun PlayerBar(
                 modifier = Modifier.width(34.dp),
                 textAlign = TextAlign.End,
             )
-            Spacer(Modifier.width(10.dp))
+            } // ← 音量组结束（滚轮只作用于这一块）
+            Spacer(Modifier.width(8.dp))
+
+            // 输出设备
+            BmIconButton(
+                icon = Icons.Outlined.Headset,
+                contentDescription = "输出设备",
+                onClick = onOpenOutputDevice,
+            )
+            Spacer(Modifier.width(6.dp))
 
             // 定时关闭
             Box {
@@ -465,3 +471,29 @@ private fun formatTime(ms: Long): String {
     val total = ms / 1000
     return (total / 60).toString() + ":" + (total % 60).toString().padStart(2, '0')
 }
+
+
+/** 输出设备列表项 */
+@Composable
+private fun OutputDeviceRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = BmType.body,
+            color = if (selected) BmColors.brand else BmColors.text,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (selected) {
+            Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(BmColors.brand))
+        }
+    }
+}
+

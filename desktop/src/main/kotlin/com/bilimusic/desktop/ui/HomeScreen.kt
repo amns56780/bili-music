@@ -1,6 +1,7 @@
 package com.bilimusic.desktop.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -102,7 +104,12 @@ fun HomeScreen(
     onSetCoverFile: (Long) -> Unit,
     immersive: ImmersiveState,
     onPickImmersiveImage: () -> Unit,
+    outputDevices: List<uk.co.caprica.vlcj.player.base.AudioDevice>,
+    selectedOutputDeviceId: String?,
+    onSelectOutputDevice: (String?) -> Unit,
 ) {
+    // 输出设备选择对话框（侧栏/播放条入口都设这个状态）
+    val showDeviceDialog = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(selectedPlaylist?.id, playlists.size) {
         println("[BmDebug] selectedPlaylist=" + selectedPlaylist?.id + " playlists=" + playlists.size + " songs=" + songs.size)
     }
@@ -121,6 +128,7 @@ fun HomeScreen(
                 onRequestLogin = onRequestLogin,
                 onLogout = onLogout,
                 onOpenLocalMusic = onOpenLocalMusic,
+                onOpenOutputDevice = { showDeviceDialog.value = true },
                 onLoadFavFolders = onLoadFavFolders,
                 onImportFolder = onImportFolder,
                 onImportToView = onImportToView,
@@ -185,7 +193,50 @@ fun HomeScreen(
             onStartSleep = onStartSleep,
             onCancelSleep = onCancelSleep,
             onCoverClick = { if (playback.current != null) immersive.open = true },
+            onOpenOutputDevice = { showDeviceDialog.value = true },
         )
+    }
+
+    // 输出设备选择对话框
+    if (showDeviceDialog.value) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showDeviceDialog.value = false }) {
+            Column(
+                modifier = Modifier
+                    .width(340.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(BmColors.bgPlayer)
+                    .border(1.dp, BmColors.divider, RoundedCornerShape(12.dp))
+                    .padding(vertical = 8.dp),
+            ) {
+                Text(
+                    text = "输出设备",
+                    style = BmType.titleM,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                DeviceRow("系统默认设备", selectedOutputDeviceId == null) {
+                    onSelectOutputDevice(null)
+                    showDeviceDialog.value = false
+                }
+                if (outputDevices.isEmpty()) {
+                    Text(
+                        text = "没有枚举到输出设备",
+                        style = BmType.label,
+                        color = BmColors.text2,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                } else {
+                    outputDevices.forEach { d ->
+                        DeviceRow(
+                            label = d.longName ?: d.deviceId,
+                            selected = selectedOutputDeviceId == d.deviceId,
+                        ) {
+                            onSelectOutputDevice(d.deviceId)
+                            showDeviceDialog.value = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 沉浸听歌模式（覆盖整个窗口，自下而上滑入）
@@ -252,3 +303,34 @@ private fun MessageBar(text: String, onDismiss: () -> Unit) {
         )
     }
 }
+
+
+/** 输出设备列表项 */
+@androidx.compose.runtime.Composable
+private fun DeviceRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = BmType.body,
+            color = if (selected) BmColors.brand else BmColors.text,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (selected) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(BmColors.brand),
+            )
+        }
+    }
+}
+

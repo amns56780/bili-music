@@ -699,7 +699,10 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     immersiveState.bgMode = com.bilimusic.desktop.ui.ImmersiveBackground.IMAGE
                                 }
                             },
-                        )
+                            outputDevices = app.playback?.outputDevices().orEmpty(),
+                            selectedOutputDeviceId = app.playback?.currentOutputDeviceId(),
+                            onSelectOutputDevice = { id -> app.playback?.setOutputDevice(id) },
+)
                     }
                 }
             }

@@ -245,6 +245,35 @@ class VlcPlayer {
         publish(positionMs = positionMs)
     }
 
+    // ---------------- 输出设备 ----------------
+
+    /** 当前 VLC 枚举到的音频输出设备（VLC 自己的 mmdevice 插件枚举，最准） */
+    fun outputDevices(): List<uk.co.caprica.vlcj.player.base.AudioDevice> = runCatching {
+        player.audio().outputDevices().toList()
+    }.getOrElse { emptyList() }
+
+    /** 当前输出模块名（正常是 mmdevice） */
+    fun audioOutputModule(): String? = runCatching { player.audio().outputDevice() }.getOrNull()
+
+    /**
+     * 切换到指定音频输出设备（运行时生效，不需要重载媒体）。
+     * VLC 3 在 Windows 上走 mmdevice 插件，deviceId 用 VLC 枚举出来的值。
+     */
+    fun setOutputDevice(deviceId: String) {
+        runCatching {
+            player.audio().setOutput("mmdevice")
+            player.audio().setOutputDevice("mmdevice", deviceId)
+        }
+    }
+
+    /** 恢复系统默认设备（清空 output device 设置） */
+    fun resetOutputDevice() {
+        runCatching {
+            player.audio().setOutput("mmdevice")
+            player.audio().setOutputDevice("mmdevice", "default")
+        }
+    }
+
     /**
      * 设置音量（0..1），直接写本进程的 Windows 音频会话音量。
      *
