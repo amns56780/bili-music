@@ -53,13 +53,13 @@ if not defined JAVAW set "JAVAW=javaw"
 echo   ??? Java??%JAVAW%
 
 rem ???? + ??????????????????????????? BM ??
-powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $a='-Dfile.encoding=GBK -cp \"%TARGET%\*\" com.bilimusic.desktop.MainKt'; foreach($d in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'))){$l=$ws.CreateShortcut((Join-Path $d 'bilimusic.lnk')); $l.TargetPath='%JAVAW%'; $l.Arguments=$a; $l.WorkingDirectory='%TARGET%'; $l.IconLocation='%TARGET%\bilimusic.ico'; $l.Description='bilimusic'; $l.Save()}"
+powershell -NoProfile -Command "$ws=New-Object -ComObject WScript.Shell; $a='-Dfile.encoding=GBK -Djna.encoding=UTF-8 -jar \"%TARGET%\\bilimusic.jar\"'; foreach($d in @([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('Programs'))){$l=$ws.CreateShortcut((Join-Path $d 'bilimusic.lnk')); $l.TargetPath='%JAVAW%'; $l.Arguments=$a; $l.WorkingDirectory='%TARGET%'; $l.IconLocation='%TARGET%\bilimusic.ico'; $l.Description='bilimusic'; $l.Save()}"
 
 rem ??? Windows????ú???????????? HKCU????????????????
 rem ?????????? ?? ??? ?? ????????á???????? bilimusic ?????ж??
 set "UNKEY=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\bilimusic"
 reg add "%UNKEY%" /v DisplayName     /t REG_SZ    /d "bilimusic" /f >nul
-reg add "%UNKEY%" /v DisplayVersion  /t REG_SZ    /d "1.2.0" /f >nul
+reg add "%UNKEY%" /v DisplayVersion  /t REG_SZ    /d "1.2.1" /f >nul
 reg add "%UNKEY%" /v Publisher       /t REG_SZ    /d "amns56780" /f >nul
 reg add "%UNKEY%" /v DisplayIcon     /t REG_SZ    /d "%TARGET%\bilimusic.ico" /f >nul
 reg add "%UNKEY%" /v InstallLocation /t REG_SZ    /d "%TARGET%" /f >nul
@@ -76,7 +76,7 @@ echo   ?????????????????? VLC??https://www.videolan.org??
 echo.
 choice /c YN /n /m "   ??????? bilimusic? [Y/N] "
 if errorlevel 2 goto :done
-start "" "%JAVAW%" -cp "%TARGET%\*" com.bilimusic.desktop.MainKt
+start "" "%JAVAW%" -jar "%TARGET%\bilimusic.jar"
 :done
 echo.
 echo   ???????????????

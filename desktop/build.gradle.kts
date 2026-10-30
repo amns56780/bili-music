@@ -8,6 +8,28 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+/**
+ * fat jar：把 50+ 个运行时 jar 合并成单个可执行 jar（java -jar 直接运行）。
+ *
+ * 不用 Shadow 插件：它和 Compose Multiplatform 的 Gradle 插件互相踩
+ * （加进来后 compileKotlin 直接找不到 Compose 运行时）。这里用 Gradle 原生 Jar。
+ *
+ * 注意点：
+ * - duplicatesStrategy=EXCLUDE：同名类取先出现的（Compose/Kotlin 内部没有真正的冲突类）
+ * - 排除 META-INF 签名文件，否则会 InvalidSignatureException
+ * - META-INF/services 做后置合并（见 mergeServiceFiles 任务）
+ */
+val fatJar by tasks.registering(Jar::class) {
+    archiveFileName.set("bilimusic.jar")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes["Main-Class"] = "com.bilimusic.desktop.MainKt"
+    }
+    from(sourceSets.main.get().output)
+    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/MANIFEST.MF")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -58,7 +80,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "bilimusic"
-            packageVersion = "1.2.0"
+            packageVersion = "1.2.1"
             description = "B站音源桌面音乐播放器"
             vendor = "amns56780"
             copyright = "MIT License"
@@ -80,9 +102,9 @@ compose.desktop {
 val portableRoot = layout.buildDirectory.dir("portable/bilimusic")
 
 val portableDist by tasks.registering(Sync::class) {
+    dependsOn(fatJar)
     into(portableRoot)
-    from(configurations.runtimeClasspath.get()) { into("lib") }
-    from(tasks.named("jar")) { into("lib") }
+    from(fatJar)
     // 内置 VLC 核心：便携版不依赖系统安装的 VLC
     // （只带 libvlc/libvlccore + plugins，不带 vlc.exe；约 80MB）
     val vlcHome = System.getenv("VLC_HOME") ?: "C:/Program Files/VideoLAN/VLC"
@@ -110,7 +132,7 @@ val portableLauncher by tasks.registering {
         File(dir, "bilimusic.bat").writeText(
             "@echo off\r\n" +
                 "cd /d %~dp0\r\n" +
-                "start \"bilimusic\" javaw -Dfile.encoding=UTF-8 -cp \"lib/*\" com.bilimusic.desktop.MainKt\r\n",
+                "start \"bilimusic\" javaw -Dfile.encoding=UTF-8 -Djna.encoding=UTF-8 -jar bilimusic.jar\r\n",
         )
         File(dir, "使用说明.txt").writeText(
             """

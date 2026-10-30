@@ -43,29 +43,23 @@ try {
 } finally {
     Pop-Location
 }
-$jar = Get-ChildItem (Join-Path $portable 'lib') -Filter 'desktop.jar' | Select-Object -First 1
-Write-Host ("  desktop.jar built at {0}  ({1} bytes)" -f $jar.LastWriteTime, $jar.Length)
+$jar = Get-Item (Join-Path $portable 'bilimusic.jar') -ErrorAction SilentlyContinue
+if (-not $jar) { throw 'bilimusic.jar fat jar not found' }
+Write-Host ("  bilimusic.jar built at {0}  ({1} bytes)" -f $jar.LastWriteTime, $jar.Length)
 
-Write-Host '[2/6] Staging a flat package root with 8.3-safe names'
+Write-Host '[2/6] Staging the fat jar package root'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
-# Short names are harmless for 7-Zip and keep the package friendly to old tools;
-# the launcher uses a wildcard classpath so file names do not matter.
-$n = 1
-Get-ChildItem (Join-Path $portable 'lib') -File | Sort-Object Name | ForEach-Object {
-    $ext = if ($_.Extension) { $_.Extension } else { '.bin' }
-    Copy-Item $_.FullName (Join-Path $stage ('j{0:d3}{1}' -f $n, $ext)) -Force
-    $n++
-}
+Copy-Item (Join-Path $portable 'bilimusic.jar') (Join-Path $stage 'bilimusic.jar') -Force
 if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $stage 'bm.ico') -Force }
-$stagedMb = [math]::Round((Get-ChildItem $stage -File | Measure-Object Length -Sum).Sum / 1MB, 1)
-Write-Host ("  {0} payload files staged ({1} MB)" -f ($n - 1), $stagedMb)
+$stagedMb = [math]::Round((Get-Item (Join-Path $stage 'bilimusic.jar')).Length / 1MB, 1)
+Write-Host ("  payload: bilimusic.jar ({0} MB)" -f $stagedMb)
 
 Write-Host '[3/6] Adding launcher / installer / uninstaller / readme'
 # Launcher, kept for debugging; shortcuts call javaw directly so no console appears.
 [System.IO.File]::WriteAllText(
     (Join-Path $stage 'bm.bat'),
-    "@echo off`r`ncd /d %~dp0`r`nstart `"bilimusic`" javaw -cp `"*`" com.bilimusic.desktop.MainKt`r`n",
+    "@echo off`r`ncd /d %~dp0`r`nstart `"bilimusic`" javaw -Dfile.encoding=UTF-8 -Djna.encoding=UTF-8 -jar bilimusic.jar`r`n",
     [System.Text.Encoding]::ASCII)
 
 # Installer and uninstaller contain Chinese, so they are stored as GBK.
@@ -147,7 +141,7 @@ foreach ($f in @('install.bat', 'uninstall.bat')) {
 }
 $uni = [System.IO.File]::ReadAllText((Join-Path $verify 'uninstall.bat'), $gbk)
 if ($uni -notmatch 'reg delete') { throw 'uninstall.bat does not remove the registry key' }
-$match = Get-ChildItem $verify -Filter 'j*.jar' | Where-Object { $_.Length -eq $jar.Length } | Select-Object -First 1
-if (-not $match) { throw 'packaged jars do not match the freshly built desktop.jar' }
+$match = Get-ChildItem $verify -Filter 'bilimusic.jar' | Where-Object { $_.Length -eq $jar.Length } | Select-Object -First 1
+if (-not $match) { throw 'packaged bilimusic.jar does not match the freshly built fat jar' }
 Write-Host '  [ok] all scripts present, GBK Chinese valid, uninstall key registered'
 Write-Host ("  [ok] packaged app matches the fresh build ({0} bytes)" -f $jar.Length)
