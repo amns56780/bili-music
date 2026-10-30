@@ -99,6 +99,9 @@ fun main() {
     if (!SingleInstance.acquire()) return
     application {
     var windowVisible by remember { mutableStateOf(true) }
+    // 沉浸模式全屏：记住进入前的窗口几何，退出全屏时还原
+    var isFullscreen by remember { mutableStateOf(false) }
+    var savedPlacement by remember { mutableStateOf<androidx.compose.ui.window.WindowPlacement?>(null) }
     val scope = rememberCoroutineScope()
     val trayState = rememberTrayState()
     // 与安卓端同一个 BM 图标（打包在 resources/icons 里）
@@ -120,9 +123,24 @@ fun main() {
         },
     )
 
+    // 播放时阻止电脑自动熄屏 / 睡眠（暂停或停止后自动恢复）。
+    // 用协程直接 collect 而不是 collectAsState + LaunchedEffect(key)：
+    // application 顶层不在 Window 的 composition 里，key 变化不一定触发重跑。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        app.playback?.state?.collect { s ->
+            if (s.playing) {
+                com.bilimusic.desktop.player.KeepAwake.enable()
+            } else {
+                com.bilimusic.desktop.player.KeepAwake.disable()
+            }
+        }
+    }
+
     // 位置/大小变化 500ms 后落盘（LaunchedEffect 的 key 变化会取消上一次，天然防抖）
-    androidx.compose.runtime.LaunchedEffect(windowState.position, windowState.size, windowVisible) {
-        if (!windowVisible) return@LaunchedEffect
+    androidx.compose.runtime.LaunchedEffect(windowState.position, windowState.size, windowVisible, isFullscreen) {
+        // 全屏时不保存几何：否则全屏尺寸（屏幕大小）会被记成"上次的窗口大小"，
+        // 下次启动窗口直接铺满屏幕
+        if (!windowVisible || isFullscreen) return@LaunchedEffect
         kotlinx.coroutines.delay(500)
         val x = windowState.position.x.value.toInt()
         val y = windowState.position.y.value.toInt()
@@ -213,7 +231,7 @@ fun main() {
         Column(modifier = Modifier.fillMaxSize()) {
             var isMaximized by remember { mutableStateOf(false) }
             var normalBounds by remember { mutableStateOf<java.awt.Rectangle?>(null) }
-            AppTitleBar(
+            if (!isFullscreen) AppTitleBar(
                 window = window,
                 title = "bilimusic",
                 icon = appIcon,
@@ -248,7 +266,21 @@ fun main() {
                 onClose = { windowVisible = false },
             )
             Box(modifier = Modifier.weight(1f)) {
-                BiliMusicDesktopApp(app)
+                BiliMusicDesktopApp(
+                    app = app,
+                    isFullscreen = isFullscreen,
+                    onToggleFullscreen = {
+                        if (isFullscreen) {
+                            windowState.placement = savedPlacement
+                                ?: androidx.compose.ui.window.WindowPlacement.Floating
+                            isFullscreen = false
+                        } else {
+                            savedPlacement = windowState.placement
+                            windowState.placement = androidx.compose.ui.window.WindowPlacement.Fullscreen
+                            isFullscreen = true
+                        }
+                    },
+                )
             }
         }
         }
@@ -406,7 +438,11 @@ private class DesktopApp(
 )
 
 @Composable
-private fun BiliMusicDesktopApp(app: DesktopApp) {
+private fun BiliMusicDesktopApp(
+    app: DesktopApp,
+    isFullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
+) {
     LaunchedEffect(app) { app.auth.bootstrap() }
 
     DesktopTheme(app.client.okHttpClient) {
@@ -699,6 +735,8 @@ private fun BiliMusicDesktopApp(app: DesktopApp) {
                                     immersiveState.bgMode = com.bilimusic.desktop.ui.ImmersiveBackground.IMAGE
                                 }
                             },
+                            isFullscreen = isFullscreen,
+                            onToggleFullscreen = onToggleFullscreen,
                             outputDevices = app.playback?.outputDevices().orEmpty(),
                             selectedOutputDeviceId = app.playback?.currentOutputDeviceId(),
                             onSelectOutputDevice = { id -> app.playback?.setOutputDevice(id) },

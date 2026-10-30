@@ -107,6 +107,8 @@ fun HomeScreen(
     outputDevices: List<uk.co.caprica.vlcj.player.base.AudioDevice>,
     selectedOutputDeviceId: String?,
     onSelectOutputDevice: (String?) -> Unit,
+    isFullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
 ) {
     // 输出设备选择对话框（侧栏/播放条入口都设这个状态）
     val showDeviceDialog = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -252,6 +254,8 @@ fun HomeScreen(
         onPickImage = onPickImmersiveImage,
         showWave = immersive.showWave,
         onToggleWave = { immersive.showWave = !immersive.showWave },
+        isFullscreen = isFullscreen,
+        onToggleFullscreen = onToggleFullscreen,
     )
     }
 

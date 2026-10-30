@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -119,6 +121,8 @@ fun ImmersivePlayer(
     onPickImage: () -> Unit,
     showWave: Boolean,
     onToggleWave: () -> Unit,
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: () -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -228,6 +232,15 @@ fun ImmersivePlayer(
                 modifier = Modifier.align(Alignment.TopEnd).padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // 全屏切换
+                ImmersiveButton(
+                    icon = if (isFullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    contentDescription = if (isFullscreen) "退出全屏" else "全屏",
+                    size = 40.dp,
+                    iconSize = 20.dp,
+                    background = Color(0x33000000),
+                    onClick = onToggleFullscreen,
+                )
                 // 播放模式切换（顺序 / 列表循环 / 单曲循环 / 随机）
                 ImmersiveButton(
                     icon = immersiveModeIcon(state.mode),
