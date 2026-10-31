@@ -156,6 +156,22 @@ fun ImmersivePlayer(
             modeTip = null
         }
 
+        // 鼠标空闲 3 秒自动隐藏光标，移动/点击立刻恢复
+        var lastMouseMoveAt by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                kotlinx.coroutines.delay(400)
+                if (System.currentTimeMillis() - lastMouseMoveAt > 3000) {
+                    com.bilimusic.desktop.player.CursorHider.hide()
+                } else {
+                    com.bilimusic.desktop.player.CursorHider.show()
+                }
+            }
+        }
+        androidx.compose.runtime.DisposableEffect(Unit) {
+            onDispose { com.bilimusic.desktop.player.CursorHider.show() }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -164,21 +180,43 @@ fun ImmersivePlayer(
                 .volumeWheel { step ->
                     val v = (controller.state.value.volume + step).coerceIn(0, 100)
                     controller.setVolume(v, persist = true)
+                }
+                // 鼠标移动 / 按下 → 重置空闲计时并恢复光标
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Move ||
+                                event.type == androidx.compose.ui.input.pointer.PointerEventType.Press
+                            ) {
+                                lastMouseMoveAt = System.currentTimeMillis()
+                                com.bilimusic.desktop.player.CursorHider.show()
+                            }
+                        }
+                    }
                 },
         ) {
             // ---------------- 点击拦截层 ----------------
             // 铺满整屏、吞掉所有落空的点击。它声明在内容之前（z 序更低），
             // 所以按钮等控件仍然优先命中；只有空白区域的点击会被这一层吃掉，
             // 不会再"穿透"到别的控件上导致误切歌。
+            //
+            // 用 pointerInput 而不是 clickable：clickable 会让这一层可聚焦，
+            // 焦点落到它身上后空格会被它消费（表现为「沉浸模式按空格不能暂停」）。
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        // 空白处点击：关闭可能展开的背景菜单，别的什么也不做
-                        showBgMenu = false
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
+                                    showBgMenu = false
+                                    // 消费掉：别让空白点击穿透到主界面
+                                    event.changes.forEach { it.consume() }
+                                }
+                            }
+                        }
                     },
             )
 

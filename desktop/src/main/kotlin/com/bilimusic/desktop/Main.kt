@@ -168,24 +168,24 @@ fun main() {
         undecorated = true,
         onKeyEvent = { event ->
             if (event.type == KeyEventType.KeyDown) {
-                // 用 keyCode 判断：Compose 的 Key 常量没有方括号，直接取 AWT 虚拟键码
-                val vk = event.key.keyCode
+                // 注意：Compose 的 event.key.keyCode 对字符键带标志位（实测空格 = 2^32 + 32），
+                // 而 Key.Spacebar.keyCode 同样带标志位，直接比是对的；
+                // 只有拿 AWT 虚拟键码（方括号）比较时才要取低 32 位。
+                val rawVk = event.key.keyCode
                 when {
-                    vk == Key.Spacebar.keyCode -> {
+                    rawVk == Key.Spacebar.keyCode -> {
                         app.playback?.togglePlayPause()
                         true
                     }
 
-                    vk == Key.MediaPlayPause.keyCode -> {
+                    rawVk == Key.MediaPlayPause.keyCode -> {
                         app.playback?.togglePlayPause()
                         true
                     }
 
                     else -> {
                         // 应用内快捷键：[ 上一首 / ] 下一首（窗口有焦点时生效）
-                        // 注意 Compose 对字符键的 keyCode 高位带标志位（实测 ] = 2^32 + 93），
-                        // 只取低 32 位才是 AWT 虚拟键码
-                        when (event.key.keyCode and 0xFFFFFFFFL) {
+                        when (rawVk and 0xFFFFFFFFL) {
                             java.awt.event.KeyEvent.VK_OPEN_BRACKET.toLong() -> {
                                 app.playback?.previous()
                                 true
