@@ -26,6 +26,8 @@ object CursorHider {
 
     private val user32: User32Cursor? = runCatching {
         Native.load("user32", User32Cursor::class.java)
+    }.onFailure {
+        com.bilimusic.app.util.AppLog.i("CursorHider", "user32 加载失败：" + it.message)
     }.getOrNull()
 
     @Volatile
@@ -36,7 +38,9 @@ object CursorHider {
     fun hide() {
         if (hidden) return
         hidden = true
-        runCatching { user32?.SetCursor(null) }
+        runCatching { user32?.SetCursor(null) }.onFailure {
+            com.bilimusic.app.util.AppLog.i("CursorHider", "隐藏失败：" + it.message)
+        }
     }
 
     /** 恢复标准箭头（幂等） */
@@ -47,6 +51,8 @@ object CursorHider {
         runCatching {
             val arrow = user32?.LoadCursorW(null, Pointer(IDC_ARROW))
             if (arrow != null) user32?.SetCursor(arrow)
+        }.onFailure {
+            com.bilimusic.app.util.AppLog.i("CursorHider", "恢复失败：" + it.message)
         }
     }
 }

@@ -9,6 +9,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -156,6 +164,15 @@ fun ImmersivePlayer(
             modeTip = null
         }
 
+        // 沉浸层自己抢焦点并处理快捷键。
+        // 不抢的话，焦点还留在下面主界面的按钮上，空格会被那个按钮当成"点击"吃掉，
+        // 表现为沉浸模式里按空格没反应。
+        val immersiveFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(80)
+            runCatching { immersiveFocus.requestFocus() }
+        }
+
         // 鼠标空闲 3 秒自动隐藏光标，移动/点击立刻恢复
         var lastMouseMoveAt by remember { mutableStateOf(System.currentTimeMillis()) }
         LaunchedEffect(Unit) {
@@ -176,6 +193,33 @@ fun ImmersivePlayer(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFF0A0A0C))
+                .focusRequester(immersiveFocus)
+                .focusable()
+                .onKeyEvent { ev ->
+                    if (ev.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) {
+                        return@onKeyEvent false
+                    }
+                    val raw = ev.key.keyCode
+                    when {
+                        raw == androidx.compose.ui.input.key.Key.Spacebar.keyCode ||
+                            raw == androidx.compose.ui.input.key.Key.MediaPlayPause.keyCode -> {
+                            controller.togglePlayPause()
+                            true
+                        }
+
+                        (raw and 0xFFFFFFFFL) == java.awt.event.KeyEvent.VK_OPEN_BRACKET.toLong() -> {
+                            controller.previous()
+                            true
+                        }
+
+                        (raw and 0xFFFFFFFFL) == java.awt.event.KeyEvent.VK_CLOSE_BRACKET.toLong() -> {
+                            controller.next()
+                            true
+                        }
+
+                        else -> false
+                    }
+                }
                 // 滚轮微调音量（±1%）：沉浸模式里没有音量条可见，滚动即可调
                 .volumeWheel { step ->
                     val v = (controller.state.value.volume + step).coerceIn(0, 100)
