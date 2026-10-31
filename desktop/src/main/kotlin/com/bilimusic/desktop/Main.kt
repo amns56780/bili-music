@@ -206,6 +206,8 @@ fun main() {
         },
     ) {
         androidx.compose.runtime.LaunchedEffect(Unit) {
+            // 沉浸模式隐藏光标时要改窗口光标，这里先拿到 AWT 窗口
+            com.bilimusic.desktop.player.CursorHider.attach(window)
             window.minimumSize = java.awt.Dimension(1000, 640)
             // 无边框窗口最大化时会盖住任务栏，用 maximizedBounds 收住
             runCatching {

@@ -1,58 +1,57 @@
 package com.bilimusic.desktop.player
 
-import com.sun.jna.Library
-import com.sun.jna.Native
-import com.sun.jna.Pointer
-
 /**
  * 沉浸模式下的鼠标自动隐藏。
  *
- * Compose Desktop 没有「隐藏光标」的 API（PointerIcon 只能换图标），
- * 所以直接调 user32 的 SetCursor(NULL) —— 它只影响**当前**光标形状，
- * 下次系统更新光标（移动/重绘）会自动恢复默认箭头，不会把用户光标弄丢。
+ * 试过两种"系统级"做法都不行：
+ *  - SetCursor(NULL)：AWT 在 WM_SETCURSOR 里会把自己的光标塞回去，立刻被覆盖
+ *  - ShowCursor(false)：显示计数确实压到 -1，但 AWT 刷新光标时又抬回来，
+ *    实测 GetCursorInfo 仍报 CURSOR_SHOWING
  *
- * 为什么不用 ShowCursor(false)：它维护一个全局计数器，进程异常退出时
- * 计数器留在负值，用户的光标就再也出不来了。
+ * 改成给窗口换一个**完全透明**的光标：这是 AWT 自己的属性，AWT 会一直保持，
+ * 不会被 WM_SETCURSOR 冲掉。恢复就是把窗口光标设回默认箭头。
+ *
+ * 每次调用都对比当前光标名，不一致才重设 —— 既避免每 400ms 刷一次属性，
+ * 也能在 AWT 因为悬停把光标改回去之后自动纠正。
+ *
+ * AwtWindow 在 Main.kt 的 Window 作用域里 attach 一次即可。
  */
 object CursorHider {
 
-    private const val IDC_ARROW = 32512L
-
-    /** user32 里 JNA 的 User32 没暴露这两个函数，单独声明最小接口 */
-    private interface User32Cursor : Library {
-        fun SetCursor(hCursor: Pointer?): Pointer?
-        fun LoadCursorW(hInstance: Pointer?, lpCursorName: Pointer?): Pointer?
-    }
-
-    private val user32: User32Cursor? = runCatching {
-        Native.load("user32", User32Cursor::class.java)
-    }.onFailure {
-        com.bilimusic.app.util.AppLog.i("CursorHider", "user32 加载失败：" + it.message)
-    }.getOrNull()
+    private const val INVISIBLE_NAME = "invisible"
 
     @Volatile
-    private var hidden = false
+    private var window: java.awt.Window? = null
 
-    /** 隐藏光标（幂等） */
-    @Synchronized
+    @Volatile
+    private var invisible: java.awt.Cursor? = null
+
+    /** 由 Main.kt 的 Window 作用域调用一次 */
+    fun attach(w: java.awt.Window) {
+        window = w
+    }
+
+    private fun invisibleCursor(): java.awt.Cursor {
+        invisible?.let { return it }
+        val img = java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        val c = java.awt.Toolkit.getDefaultToolkit().createCustomCursor(img, java.awt.Point(0, 0), INVISIBLE_NAME)
+        invisible = c
+        return c
+    }
+
+    /** 隐藏光标 */
     fun hide() {
-        if (hidden) return
-        hidden = true
-        runCatching { user32?.SetCursor(null) }.onFailure {
-            com.bilimusic.app.util.AppLog.i("CursorHider", "隐藏失败：" + it.message)
+        runCatching {
+            val w = window ?: return
+            if (w.cursor?.name != INVISIBLE_NAME) w.cursor = invisibleCursor()
         }
     }
 
-    /** 恢复标准箭头（幂等） */
-    @Synchronized
+    /** 恢复默认箭头 */
     fun show() {
-        if (!hidden) return
-        hidden = false
         runCatching {
-            val arrow = user32?.LoadCursorW(null, Pointer(IDC_ARROW))
-            if (arrow != null) user32?.SetCursor(arrow)
-        }.onFailure {
-            com.bilimusic.app.util.AppLog.i("CursorHider", "恢复失败：" + it.message)
+            val w = window ?: return
+            if (w.cursor !== java.awt.Cursor.getDefaultCursor()) w.cursor = java.awt.Cursor.getDefaultCursor()
         }
     }
 }
