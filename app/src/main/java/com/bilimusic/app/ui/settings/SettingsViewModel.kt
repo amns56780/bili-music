@@ -23,6 +23,7 @@ import javax.inject.Inject
 
 data class SettingsUiState(
     val audioQuality: AudioQualityOption = AudioQualityOption.AUTO,
+    val keepPlayingWithOtherApps: Boolean = PlaybackPrefs.DEFAULT_KEEP_PLAYING_WITH_OTHERS,
     val cacheLimitBytes: Long = PlaybackPrefs.DEFAULT_CACHE_LIMIT_BYTES,
     val cacheUsedBytes: Long = 0L,
     val qualityDialogOpen: Boolean = false,
@@ -59,6 +60,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            playbackPrefs.keepPlayingWithOtherApps.collect { keep ->
+                _uiState.value = _uiState.value.copy(keepPlayingWithOtherApps = keep)
+            }
+        }
+        viewModelScope.launch {
             playbackPrefs.cacheLimitBytes.collect { limit ->
                 _uiState.value = _uiState.value.copy(cacheLimitBytes = limit)
             }
@@ -92,6 +98,25 @@ class SettingsViewModel @Inject constructor(
             playbackPrefs.setAudioQuality(option.name)
             _uiState.value = _uiState.value.copy(qualityDialogOpen = false)
             _messages.send("音质已切换为「${option.settingLabel}」，当前歌曲不中断，从下一首开始生效")
+        }
+    }
+
+    // ---------------- 音频焦点开关 ----------------
+
+    /**
+     * 切换「与其他 App 同时播放」：只写偏好，播放服务监听这个偏好，
+     * 会立刻调用 ExoPlayer.setAudioAttributes 重新评估音频焦点（不用重启服务/播放器）。
+     */
+    fun setKeepPlayingWithOtherApps(keep: Boolean) {
+        viewModelScope.launch {
+            playbackPrefs.setKeepPlayingWithOtherApps(keep)
+            _messages.send(
+                if (keep) {
+                    "已开启：抖音/微信等前台软件出声时，本 App 继续播放"
+                } else {
+                    "已关闭：其他 App 开始放声音时，本 App 会自动暂停"
+                },
+            )
         }
     }
 

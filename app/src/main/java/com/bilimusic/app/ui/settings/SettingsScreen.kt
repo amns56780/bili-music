@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.BatterySaver
@@ -45,6 +46,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -129,6 +131,24 @@ fun SettingsScreen(
                     Column {
                         BatteryOptimizationRow()
                         NotificationPermissionRow()
+                    }
+                }
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        SwitchRow(
+                            icon = Icons.AutoMirrored.Outlined.VolumeUp,
+                            title = "与其他 App 同时播放",
+                            subtitle = if (uiState.keepPlayingWithOtherApps) {
+                                "已开启：抖音/微信等前台软件出声时，本 App 继续播放（不申请音频焦点）"
+                            } else {
+                                "已关闭：其他 App 开始放声音时，本 App 会自动暂停"
+                            },
+                            checked = uiState.keepPlayingWithOtherApps,
+                            onCheckedChange = viewModel::setKeepPlayingWithOtherApps,
+                        )
                     }
                 }
             }
@@ -229,8 +249,10 @@ fun SettingsScreen(
     if (showKnownLimits) {
         InfoDialog(
             title = "已知限制",
-            message = "本 App 刻意不申请音频焦点（AudioFocus），以实现「和别的 App 同时出声互不打断」，" +
-                "因此有以下已知限制：\n\n" +
+            message = "本 App 默认不申请音频焦点（AudioFocus），以实现「和别的 App 同时出声互不打断」；" +
+                "这个行为可以在设置里用「与其他 App 同时播放」开关关掉，" +
+                "关掉后就是标准音乐 App 的行为：别的 App 出声时本 App 自动暂停。\n\n" +
+                "默认模式（同时播放）下的已知限制：\n\n" +
                 "1. 来电、系统闹钟、语音助手占用音频通道属于系统/硬件层抢占，无法完全避免被静音。\n\n" +
                 "2. 部分国产 ROM（MIUI / ColorOS / HarmonyOS 等）有自己的后台播放管控，" +
                 "可能强制暂停或压低后台音量。可以在系统设置里为本 App 关闭电池优化。\n\n" +
@@ -537,6 +559,40 @@ private fun AccountCard(
             )
         }
     }
+}
+
+/** 带开关的设置行：整行可点，点哪都切换 */
+@Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        leadingContent = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) },
+    )
 }
 
 @Composable

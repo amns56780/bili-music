@@ -60,6 +60,15 @@ class PlaybackPrefs @Inject constructor(
     val keepNotificationWhenPaused: Flow<Boolean> =
         dataStore.data.map { it[KEY_KEEP_NOTIFICATION] ?: true }
 
+    /**
+     * 前台软件播放音频时后台音乐是否继续播放（默认 true）。
+     *
+     * true  = 不申请音频焦点（handleAudioFocus = false）—— 与其他 App 同时出声、互不打断，这是本 App 的默认行为；
+     * false = 申请音频焦点（handleAudioFocus = true）—— 标准音乐 App 行为：别的 App 开始放声音时本 App 自动暂停。
+     */
+    val keepPlayingWithOtherApps: Flow<Boolean> =
+        dataStore.data.map { it[KEY_KEEP_PLAYING_WITH_OTHERS] ?: DEFAULT_KEEP_PLAYING_WITH_OTHERS }
+
     suspend fun setPlayMode(mode: String) = edit { it[KEY_PLAY_MODE] = mode }
 
     suspend fun setAudioQuality(option: String) = edit { it[KEY_QUALITY] = option }
@@ -100,6 +109,9 @@ class PlaybackPrefs @Inject constructor(
     suspend fun setKeepNotificationWhenPaused(keep: Boolean) =
         edit { it[KEY_KEEP_NOTIFICATION] = keep }
 
+    suspend fun setKeepPlayingWithOtherApps(keep: Boolean) =
+        edit { it[KEY_KEEP_PLAYING_WITH_OTHERS] = keep }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         dataStore.edit(block)
     }
@@ -129,6 +141,9 @@ class PlaybackPrefs @Inject constructor(
         const val DEFAULT_SLEEP_MINUTES = 30
         const val DEFAULT_CACHE_LIMIT_BYTES = 2L * 1024 * 1024 * 1024
 
+        /** 默认与其他 App 同时播放（不申请音频焦点），保持原有行为 */
+        const val DEFAULT_KEEP_PLAYING_WITH_OTHERS = true
+
         private val KEY_PLAY_MODE = stringPreferencesKey("play_mode")
         private val KEY_QUALITY = stringPreferencesKey("audio_quality")
         private val KEY_SLEEP_MINUTES = intPreferencesKey("sleep_timer_default_minutes")
@@ -140,5 +155,6 @@ class PlaybackPrefs @Inject constructor(
         private val KEY_CACHE_LIMIT = longPreferencesKey("cache_limit_bytes")
         private val KEY_LAST_SONG_ID = longPreferencesKey("last_played_song_id")
         private val KEY_KEEP_NOTIFICATION = booleanPreferencesKey("keep_notification_when_paused")
+        private val KEY_KEEP_PLAYING_WITH_OTHERS = booleanPreferencesKey("keep_playing_with_other_apps")
     }
 }

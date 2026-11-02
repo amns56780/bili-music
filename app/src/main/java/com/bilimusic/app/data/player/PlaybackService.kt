@@ -2,6 +2,7 @@ package com.bilimusic.app.data.player
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -12,7 +13,13 @@ import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.bilimusic.app.MainActivity
+import com.bilimusic.app.data.local.prefs.PlaybackPrefs
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 import kotlin.random.Random
@@ -20,9 +27,12 @@ import kotlin.random.Random
 /**
  * FR-6 / FR-8 播放服务：MediaSessionService + 唯一的 ExoPlayer 实例。
  *
- * ★ 音频焦点：`setAudioAttributes(audioAttributes, handleAudioFocus = false)`
- *   —— 完全不接管音频焦点，所以抖音/微信在放声音时本 App 的音量不降、不暂停。
- *   **绝对不要**调用 AudioManager.requestAudioFocus()。
+ * ★ 音频焦点：默认 `setAudioAttributes(audioAttributes, handleAudioFocus = false)`
+ *   —— 不接管音频焦点，所以抖音/微信在放声音时本 App 的音量不降、不暂停。
+ *   设置页的「与其他 App 同时播放」开关可以关掉它：关掉后改为
+ *   `handleAudioFocus = true`，别的 App 开始放声音时由 AudioFocusManager 自动暂停本 App。
+ *   **绝对不要**自己调用 AudioManager.requestAudioFocus()：焦点必须交给 ExoPlayer 统一管理，
+ *   否则会和它内部的 AudioFocusManager 打架（重复申请/无法正确释放）。
  * ★ `setHandleAudioBecomingNoisy(false)`：拔耳机也不暂停（刻意设置）。
  * ★ `setWakeMode(C.WAKE_MODE_NETWORK)`：息屏后仍能持续缓冲，防止后台断流。
  *
@@ -40,12 +50,24 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var sleepTimer: SleepTimer
 
+    @Inject
+    lateinit var playbackPrefs: PlaybackPrefs
+
     private var mediaSession: MediaSession? = null
+
+    private lateinit var player: ExoPlayer
+    private lateinit var audioAttributes: AudioAttributes
+
+    /** 当前是否把音频焦点交给 ExoPlayer 管理（true = 申请焦点、别的 App 出声时自动暂停） */
+    private var handleAudioFocus = false
+
+    /** 跟着服务生命周期走的协程作用域，用于监听设置里的音频焦点开关 */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
 
-        val audioAttributes = AudioAttributes.Builder()
+        audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
@@ -55,7 +77,9 @@ class PlaybackService : MediaSessionService() {
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(BiliLoadErrorHandlingPolicy())
 
-        val player = ExoPlayer.Builder(this)
+        // 初始按「不接管焦点」构建：设置里默认就是「与其他 App 同时播放」。
+        // 如果用户改过开关，下面 collect 的第一帧会立刻把模式切过去（setAudioAttributes 会重新评估焦点）。
+        player = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ false)
             .setHandleAudioBecomingNoisy(false)
             .setWakeMode(C.WAKE_MODE_NETWORK)
@@ -105,6 +129,30 @@ class PlaybackService : MediaSessionService() {
             },
             onRefreshNotification = { refreshPlaybackNotification() },
         )
+
+        // 设置页「与其他 App 同时播放」开关：开着（默认）= 不接管音频焦点；
+        // 关掉 = 把焦点交给 ExoPlayer 管理，别的 App 开始放声音时自动暂停本 App。
+        // 放在这里而不是构建参数里，是为了切换开关时立刻生效、不用重启服务。
+        serviceScope.launch {
+            playbackPrefs.keepPlayingWithOtherApps.collect { keep ->
+                applyAudioFocusMode(keep)
+            }
+        }
+    }
+
+    /**
+     * 切换音频焦点模式。
+     *
+     * ExoPlayer 的 setAudioAttributes 内部会立刻重新评估焦点：
+     * 开启时马上申请（正在播放就抢焦点），关闭时立刻 abandon，所以不用暂停/重播。
+     */
+    private fun applyAudioFocusMode(keepPlayingWithOtherApps: Boolean) {
+        val handleFocus = !keepPlayingWithOtherApps
+        if (handleFocus == handleAudioFocus) return
+        handleAudioFocus = handleFocus
+        Log.i(TAG, "音频焦点模式切换：handleAudioFocus=" + handleFocus)
+        runCatching { player.setAudioAttributes(audioAttributes, handleFocus) }
+            .onFailure { Log.w(TAG, "切换音频焦点失败", it) }
     }
 
     /** 定时状态变化 / 每秒倒计时时刷新通知栏 */
@@ -128,6 +176,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         sleepTimer.detach()
         mediaSession?.run {
             player.release()
@@ -148,5 +197,9 @@ class PlaybackService : MediaSessionService() {
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+    }
+
+    private companion object {
+        const val TAG = "PlaybackService"
     }
 }

@@ -17,7 +17,7 @@
 > 侧载安装，不上架应用商店。
 
 **已实现**：扫码/Cookie 登录 · 4 种来源导入歌单（含合集/分P 选集）· WBI 签名取流（URL 过期自动重取）·
-Media3 播放内核 + 通知栏/锁屏/蓝牙线控 · **刻意不申请音频焦点**（可与其他 App 同时出声）·
+Media3 播放内核 + 通知栏/锁屏/蓝牙线控 · **默认不申请音频焦点**（可与其他 App 同时出声，设置页可切回标准行为）·
 4 种播放模式 + 队列可视化 + 定时关闭 · **离线缓存**（cacheKey 用 `bvid-cid-音质`）· 6 档音质选择 · Glance 桌面小组件 ·
 **歌单间批量复制/移动** · **本地音乐**（扫描系统媒体库，可直接播放或导入歌单）。
 
@@ -129,7 +129,8 @@ Media3 播放内核 + 通知栏/锁屏/蓝牙线控 · **刻意不申请音频�
   由 `ResolvingDataSource` 在**每次 open 时**解析成真实地址 —— 所以导入 99 首不需要 99 次取流，
   而几小时后才播到的那首也一定是新鲜地址
 - **音频数据源**：`OkHttpDataSource`（复用同一个 OkHttpClient，自带 Referer/UA，防 403）→ 虚拟 URI 解析 → 403 失效重取
-- **ExoPlayer 关键配置**（任务书 FR-6）：`setAudioAttributes(attrs, handleAudioFocus = false)` 不接管音频焦点、
+- **ExoPlayer 关键配置**（任务书 FR-6）：默认 `setAudioAttributes(attrs, handleAudioFocus = false)` 不接管音频焦点
+  （设置页「与其他 App 同时播放」可关掉，关掉后改为 `handleAudioFocus = true`，别的 App 出声时自动暂停）、
   `setHandleAudioBecomingNoisy(false)` 拔耳机不暂停、`setWakeMode(C.WAKE_MODE_NETWORK)` 息屏不断流、seek 步长 10 秒
 - **播放页**：封面、标题、UP主、**「第 X 首 / 共 N 首」大字常驻**、可拖动进度条、当前/总时长、
   上一首/播放暂停/下一首、播放模式按钮（顺序 → 列表循环 → 单曲循环 → 随机）、当前音质标签；
@@ -358,7 +359,7 @@ app/src/main/java/com/bilimusic/app/
 | FR-3 | 选集 | 分P 与合集都能逐条勾选，默认全选，全选/全不选/反选，`已选 n / 共 m`，勾选持久记忆，队列只含勾选项且保持原始顺序 | ✅ | 真实 639 集合集：默认「已选 639 / 共 639」；反选→「已选 0」+ 按钮置灰 +「请至少选择 1 集」；退出重进勾选保留；先勾第 3 集再勾第 1 集 → 播放页「第 1 首 / 共 2 首」且从第 1 集播；队列页显示「合集 · 第 1 集 / 共 639 集」 |
 | FR-4 | 播放模式 + 顺序可视化 | 顺序 / 列表循环 / 单曲循环 / 随机（固定 seed）；播放页常驻「第 X 首 / 共 N 首」；队列页按真实播放顺序编号、当前项高亮 | ✅ | 四种模式循环切换；播放页显示「第 1 首 / 共 5 首」；队列页按真实顺序编号 1..N、当前项高亮 + 呼吸电平动画；点第 3 项成功跳到第 3 首（`active item id=2`） |
 | FR-5 | 定时关闭 | 15/30/45/60/90/120 分钟 + 自定义；默认「播完当前歌曲后停止」；`elapsedRealtime` 计时；到点后当前曲完整播完才停 | ✅ | 自动化用例 `SleepTimerDeadlineTest` 通过：到点后标签变「本曲播完后停止」、**音乐不中断**（60 秒等待期间位置持续推进），本曲自然播完后**停止且不多播下一首**；未选定时间时点「开始」被拦截 |
-| FR-6 | 后台不被其他 App 打断 | `setAudioAttributes(..., handleAudioFocus = false)`，不申请音频焦点，两路声音同时出声 | ✅ | `dumpsys audio` 焦点栈里**没有本 App**；与抖音（uid 10326）**同时** `state:started`（我方 48kHz、抖音 44.1kHz）、两边 `mutedState:none`；12 秒内我方播放位置推进 12012ms，无暂停无降音量 |
+| FR-6 | 后台不被其他 App 打断 | 默认 `setAudioAttributes(..., handleAudioFocus = false)`，不申请音频焦点，两路声音同时出声；设置页「与其他 App 同时播放」开关可切回标准行为（申请焦点、被别的 App 出声时暂停） | ✅ | `dumpsys audio` 焦点栈里**没有本 App**；与抖音（uid 10326）**同时** `state:started`（我方 48kHz、抖音 44.1kHz）、两边 `mutedState:none`；12 秒内我方播放位置推进 12012ms，无暂停无降音量 |
 | FR-7 | UI 规范 | Material 3、动态取色、深色模式、edge-to-edge、字体 1.3x、横屏/平板分栏；每个按钮都有反馈，空状态/加载/错误三态齐全 | ✅ | 全中文界面；字体 1.3x 下无裁切（UID、长副标题、缓存信息均正常换行）；横屏歌单网格 / 详情 / 播放页左右分栏均不破版、旋转不重建；深色卡片层次 RGB(5,6,10) 底 / RGB(31,34,43) 卡片 |
 | FR-8 | 通知栏 / 锁屏 / 线控 | MediaSessionService 默认通知 + 锁屏控制 + 蓝牙线控 + 定时剩余时间辅助行 | ✅ | 通知栏媒体卡片（封面/标题/UP主 + 上一首/暂停/下一首，`category=transport actions=3 vis=PUBLIC`）；`KEYCODE_MEDIA_PLAY_PAUSE` 暂停→播放、`KEYCODE_MEDIA_NEXT` 切歌；设了定时后通知栏带剩余时间 |
 | FR-9 | 离线缓存 | SimpleCache + DownloadManager；cacheKey = `bvid-cid-音质`（不能用 120 分钟过期的 URL 当 key）；LRU 淘汰 | ✅ | 单曲下载后图标变 ✓ 已下载，缓存管理显示「已用 10.9 MB / 上限 2.00 GB」「已下载 · 10.9 MB」；**`svc wifi/data disable` 完全断网**（`Active default network: none`）后仍能正常播放已下载曲目（PLAYING + AudioTrack `state:started` 48kHz） |
@@ -374,7 +375,10 @@ app/src/main/java/com/bilimusic/app/
 
 ### 关于「后台播放不被其他 App 打断」（FR-6）
 
-本 App **刻意不申请音频焦点**（`handleAudioFocus = false`），这样才能做到「抖音/微信在放声音时，本 App 的音乐不降音量、不暂停，两路同时出声」。代价是：
+本 App **默认不申请音频焦点**（`handleAudioFocus = false`），这样才能做到「抖音/微信在放声音时，本 App 的音乐不降音量、不暂停，两路同时出声」。
+如果不想要这个行为，可以在**设置页**关掉「与其他 App 同时播放」开关：关掉后改为申请音频焦点，别的 App 开始放声音时本 App 会自动暂停（标准音乐 App 行为），切换即时生效、不用重启。
+
+默认模式（同时播放）的代价是：
 
 1. **来电、系统闹钟、语音助手占用音频通道属于系统/硬件层抢占，无法完全避免被静音。**
 2. **部分国产 ROM（MIUI / ColorOS / HarmonyOS 等）有自己的后台播放管控**，可能强制暂停或压低后台音量。App 内提供「引导关闭电池优化」的设置项（Phase 5）。
