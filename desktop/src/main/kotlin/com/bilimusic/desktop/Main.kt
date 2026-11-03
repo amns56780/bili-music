@@ -78,7 +78,7 @@ fun main() {
     // （纯英文文件名的却能播，表现极具迷惑性）。
     // JNA 在 Native 类初始化时读取这个属性，所以必须在创建 VlcPlayer 之前设好。
     System.setProperty("jna.encoding", "UTF-8")
-    // 便携版内置了 VLC（vlc/ 目录）：优先用它，找不到则回退系统安装的 VLC。
+    // 安装版 / 便携版都自带 VLC 内核（程序目录下的 vlc/）：优先用它，找不到才回退系统装好的 VLC。
     // 必须在任何 JNA/VLC 调用之前设置 jna.library.path —— JNA 的 Native 类
     // 在初始化时就读取该属性，之后再设无效。
     val builtinVlcDir = runCatching {
@@ -808,7 +808,7 @@ private fun DesktopTheme(client: okhttp3.OkHttpClient, content: @Composable () -
     }
 }
 
-/** 没装 VLC 时的提示（播放内核依赖系统 VLC） */
+/** 内置 VLC 缺失时的提示（正常情况下安装包自带，不用用户装） */
 @Composable
 private fun VlcMissingHint() {
     Column(
@@ -816,11 +816,12 @@ private fun VlcMissingHint() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("没有找到 VLC", style = MaterialTheme.typography.headlineMedium)
+        Text("没有找到播放内核", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(12.dp))
         Text(
-            text = "桌面版用 VLC 作为播放内核（B 站的 m4a/aac/flac 都能播）。\n" +
-                "请先安装 VLC（videolan.org），然后重新启动本程序。",
+            text = "桌面版用 VLC 作为播放内核（B 站的 m4a/aac/flac 都能播），安装包已自带。\n" +
+                "看到这个提示说明程序目录下的 vlc 文件夹缺失或被删了：重新安装一次即可；\n" +
+                "也可以自己装一个 VLC（videolan.org）作为后备。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

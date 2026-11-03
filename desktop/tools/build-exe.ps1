@@ -47,13 +47,25 @@ $jar = Get-Item (Join-Path $portable 'bilimusic.jar') -ErrorAction SilentlyConti
 if (-not $jar) { throw 'bilimusic.jar fat jar not found' }
 Write-Host ("  bilimusic.jar built at {0}  ({1} bytes)" -f $jar.LastWriteTime, $jar.Length)
 
-Write-Host '[2/6] Staging the fat jar package root'
+Write-Host '[2/6] Staging the app payload (fat jar + bundled VLC core)'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item (Join-Path $portable 'bilimusic.jar') (Join-Path $stage 'bilimusic.jar') -Force
 if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $stage 'bm.ico') -Force }
 $stagedMb = [math]::Round((Get-Item (Join-Path $stage 'bilimusic.jar')).Length / 1MB, 1)
 Write-Host ("  payload: bilimusic.jar ({0} MB)" -f $stagedMb)
+
+# Bundle the VLC playback core: same set as the portable build (libvlc + plugins).
+# The app looks for <install dir>lclibvlc.dll at startup and points JNA there,
+# so an installed copy no longer depends on a system-wide VLC installation.
+$vlcSrc = Join-Path $portable 'vlc'
+if (-not (Test-Path (Join-Path $vlcSrc 'libvlc.dll'))) {
+    throw ('bundled VLC core not found under ' + $vlcSrc + ' - build the portable payload with VLC available first')
+}
+Copy-Item $vlcSrc (Join-Path $stage 'vlc') -Recurse -Force
+$vlcFiles = @(Get-ChildItem (Join-Path $stage 'vlc') -Recurse -File)
+$vlcMb = [math]::Round((($vlcFiles | Measure-Object Length -Sum).Sum) / 1MB, 1)
+Write-Host ("  payload: VLC core ({0} files, {1} MB, plugins included)" -f $vlcFiles.Count, $vlcMb)
 
 Write-Host '[3/6] Adding launcher / installer / uninstaller / readme'
 # Launcher, kept for debugging; shortcuts call javaw directly so no console appears.
@@ -76,12 +88,14 @@ foreach ($pair in @(
 
 [System.IO.File]::WriteAllText(
     (Join-Path $stage 'readme.txt'),
-    "bilimusic desktop`r`n`r`nRequirements:`r`n  1) JRE/JDK 17+ (java on PATH)`r`n  2) VLC installed (https://www.videolan.org)`r`n`r`nRun: double-click bilimusic.bat`r`nInstalled copy: %LOCALAPPDATA%\Programs\bilimusic`r`nUninstall: Settings - Apps, or uninstall.bat in the install folder`r`n`r`nData: %USERPROFILE%\.bilimusic (settings.json, playlists.json, downloads\)`r`n",
+    "bilimusic desktop`r`n`r`nRequirements:`r`n  1) JRE/JDK 17+ (java on PATH)`r`n  2) Nothing else - the VLC playback core is bundled in .\vlc`r`n`r`nRun: double-click bilimusic.bat`r`nDefault install dir: %LOCALAPPDATA%\Programs\bilimusic (or wherever you chose)`r`nUninstall: Settings - Apps, or uninstall.bat in the install folder`r`n`r`nData: %USERPROFILE%\.bilimusic (settings.json, playlists.json, downloads\)`r`n",
     [System.Text.Encoding]::ASCII)
 
 foreach ($need in @('install.bat', 'uninstall.bat', 'bm.bat', 'readme.txt', 'bm.ico')) {
     if (-not (Test-Path (Join-Path $stage $need))) { throw ('staged package is missing ' + $need) }
 }
+if (-not (Test-Path (Join-Path $stage 'vlc\libvlc.dll'))) { throw 'staged package is missing vlc\libvlc.dll' }
+if (-not (Test-Path (Join-Path $stage 'vlc\plugins'))) { throw 'staged package is missing vlc\plugins' }
 
 Write-Host '[4/6] Packing with 7-Zip and attaching the SFX module'
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
@@ -126,6 +140,11 @@ $ErrorActionPreference = 'Continue'
 $ErrorActionPreference = $prevEap
 $names = (Get-ChildItem $verify -File).Name
 Write-Host ("  extracted {0} files" -f $names.Count)
+$vlcVerify = Join-Path $verify 'vlc'
+if (-not (Test-Path (Join-Path $vlcVerify 'libvlc.dll'))) { throw 'EXE is missing vlc\libvlc.dll' }
+if (-not (Test-Path (Join-Path $vlcVerify 'plugins'))) { throw 'EXE is missing vlc\plugins' }
+$vlcVerifyFiles = @(Get-ChildItem $vlcVerify -Recurse -File)
+Write-Host ("  bundled VLC: {0} files ({1} MB)" -f $vlcVerifyFiles.Count, [math]::Round((($vlcVerifyFiles | Measure-Object Length -Sum).Sum) / 1MB, 1))
 foreach ($need in @('install.bat', 'uninstall.bat', 'bm.bat', 'bm.ico', 'readme.txt')) {
     if ($names -notcontains $need) { throw ('EXE is missing ' + $need) }
 }

@@ -32,9 +32,10 @@ echo   安装目录：%TARGET%
 echo.
 
 rem 先结束正在运行的 bilimusic 进程，否则文件被占用删不掉。
-rem 只结束命令行里含 com.bilimusic.desktop.MainKt 的进程，
+rem 认两种启动方式：java -jar bilimusic.jar（安装版快捷方式），
+rem 以及老版本的 -cp ... com.bilimusic.desktop.MainKt。
 rem Gradle 守护进程等其它 Java 进程一律不动。
-powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='javaw.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*com.bilimusic.desktop.MainKt*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'javaw?' -and ($_.CommandLine -like '*bilimusic.jar*' -or $_.CommandLine -like '*com.bilimusic.desktop.MainKt*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 echo   · 已关闭正在运行的 bilimusic
 
 choice /c YN /n /m "   是否同时删除歌单与登录信息（%USERPROFILE%\.bilimusic）? [Y/N] "

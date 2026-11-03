@@ -30,7 +30,10 @@ B 站音源的 Windows 音乐播放器，与安卓版**共用同一套后端逻�
 
 ## 二、运行 / 打包
 
-> 前置：**JDK 17+**（本项目用 JDK 21 验证）、**已安装 VLC**（<https://www.videolan.org>，播放内核依赖它）。
+> 前置：**JDK 17+**（本项目用 JDK 21 验证）。
+> VLC 播放内核已经内置在安装包 / 便携版里（程序目录下的 `vlc/`），用户不用再单独安装 VLC。
+> 只有开发时用 `:desktop:run` 直接跑源码、或打包机器想生成内置 VLC 的包，本机才需要装一个 VLC
+> （打包脚本默认从 `C:/Program Files/VideoLAN/VLC` 复制，可用环境变量 `VLC_HOME` 指定其它路径）。
 
 ```powershell
 # 1) 直接运行（开发用）
@@ -50,7 +53,9 @@ B 站音源的 Windows 音乐播放器，与安卓版**共用同一套后端逻�
 powershell -ExecutionPolicy Bypass -File desktop\tools\build-exe.ps1
 ```
 
-没装 VLC 时程序不会崩溃：会停在提示页，提示安装 VLC 后重启。
+安装包（`.exe`）和便携版 zip 都自带 `vlc/` 目录（libvlc + libvlccore + plugins），
+装完即可播放，不依赖系统里是否装过 VLC。程序启动时优先用程序目录下的内置 VLC，
+找不到时才回退系统安装的 VLC；两者都没有才会停在提示页（不会崩溃）。
 
 ---
 
