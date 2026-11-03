@@ -36,6 +36,8 @@ class ImportService(
     private val client: BiliClient,
     private val store: PlaylistStore,
     private val scope: CoroutineScope,
+    /** 建歌单撞上重名时问用户（Main.kt 里用 Compose 对话框实现） */
+    private val conflicts: PlaylistConflictResolver,
 ) {
 
     private val _progress = MutableStateFlow(ImportProgress())
@@ -55,6 +57,15 @@ class ImportService(
         _progress.value = _progress.value.copy(error = null)
     }
 
+    /**
+     * 用户在重名对话框里点了「取消」：中止本次导入。
+     * 因为目标歌单是在真正拿到数据之后才落库的，这里不需要回滚任何东西。
+     */
+    private fun cancelImport(title: String) {
+        AppLog.i(TAG, "用户取消导入「" + title + "」")
+        _progress.value = ImportProgress(text = "已取消导入「" + title + "」")
+    }
+
     /** 拉取「我创建的收藏夹」列表；调用方传入登录账号的 mid */
     fun loadFavFolders(mid: Long, onResult: (List<FavFolderDto>) -> Unit) {
         scope.launch {
@@ -72,8 +83,10 @@ class ImportService(
     fun importFavFolder(folderId: Long, folderTitle: String) {
         scope.launch {
             _progress.value = ImportProgress(running = true, text = "正在导入「$folderTitle」…")
-            val playlistId = store.findBySource(PlaylistSourceType.FAV, folderTitle)?.id
-                ?: store.createPlaylist(folderTitle, PlaylistSourceType.FAV)
+            // 先决定目标歌单：同一来源直接复用（不弹窗）；重名则弹窗等用户选，取消则整次导入中止。
+            // 这里只做判断不写库，真正落库等数据拉到之后（见下面 target.commit）。
+            val target = resolveImportPlaylist(store, conflicts, folderTitle, PlaylistSourceType.FAV)
+                ?: return@launch cancelImport(folderTitle)
 
             val collected = mutableListOf<NewSong>()
             var page = 1
@@ -120,9 +133,11 @@ class ImportService(
             }
 
             val withCid = resolveCids(collected, folderTitle)
+            // 数据真的拉到了才落库：取消 / 拉取失败都不会在库里留下半成品歌单
+            val playlistId = target.commit(store, PlaylistSourceType.FAV)
             val added = store.addSongs(playlistId, withCid)
             _progress.value = ImportProgress(
-                text = "「$folderTitle」导入完成：新增 $added 首" +
+                text = "「${target.title}」导入完成：新增 $added 首" +
                     if (withCid.size < collected.size) "，${collected.size - withCid.size} 首取不到音频轨道已跳过" else "",
             )
         }
@@ -132,8 +147,8 @@ class ImportService(
         scope.launch {
             val title = "稍后再看"
             _progress.value = ImportProgress(running = true, text = "正在导入「$title」…")
-            val playlistId = store.findBySource(PlaylistSourceType.TOVIEW, title)?.id
-                ?: store.createPlaylist(title, PlaylistSourceType.TOVIEW)
+            val target = resolveImportPlaylist(store, conflicts, title, PlaylistSourceType.TOVIEW)
+                ?: return@launch cancelImport(title)
 
             val signed = client.wbiSigner.sign(mapOf("access_key" to "", "pn" to "1", "ps" to "50"))
             when (val result = apiCall { client.api.toView() }) {
@@ -149,8 +164,9 @@ class ImportService(
                             durationMs = item.duration * 1000L,
                         )
                     }
+                    val playlistId = target.commit(store, PlaylistSourceType.TOVIEW)
                     val added = store.addSongs(playlistId, songs)
-                    _progress.value = ImportProgress(text = "「$title」导入完成：新增 $added 首")
+                    _progress.value = ImportProgress(text = "「${target.title}」导入完成：新增 $added 首")
                 }
 
                 is ApiResult.Error -> _progress.value = ImportProgress(
@@ -165,8 +181,8 @@ class ImportService(
         scope.launch {
             val name = uname.ifBlank { "UP主 $mid" }
             _progress.value = ImportProgress(running = true, text = "正在导入「$name」的投稿…")
-            val playlistId = store.findBySource(PlaylistSourceType.UPLOAD, name)?.id
-                ?: store.createPlaylist(name, PlaylistSourceType.UPLOAD)
+            val target = resolveImportPlaylist(store, conflicts, name, PlaylistSourceType.UPLOAD)
+                ?: return@launch cancelImport(name)
 
             val collected = mutableListOf<NewSong>()
             var page = 1
@@ -219,9 +235,10 @@ class ImportService(
             }
 
             val withCid = resolveCids(collected, name)
+            val playlistId = target.commit(store, PlaylistSourceType.UPLOAD)
             val added = store.addSongs(playlistId, withCid)
             _progress.value = ImportProgress(
-                text = "「$name」导入完成：新增 $added 首" +
+                text = "「${target.title}」导入完成：新增 $added 首" +
                     if (withCid.size < collected.size) "，${collected.size - withCid.size} 首取不到音频轨道已跳过" else "",
             )
         }
@@ -232,8 +249,8 @@ class ImportService(
         scope.launch {
             val name = title.ifBlank { "合集 $seasonId" }
             _progress.value = ImportProgress(running = true, text = "正在导入合集「$name」…")
-            val playlistId = store.findBySource(PlaylistSourceType.SEASON, name)?.id
-                ?: store.createPlaylist(name, PlaylistSourceType.SEASON)
+            val target = resolveImportPlaylist(store, conflicts, name, PlaylistSourceType.SEASON)
+                ?: return@launch cancelImport(name)
 
             val songs = mutableListOf<NewSong>()
             var page = 1
@@ -282,8 +299,9 @@ class ImportService(
                 }
             }
 
+            val playlistId = target.commit(store, PlaylistSourceType.SEASON)
             val added = store.addSongs(playlistId, songs)
-            _progress.value = ImportProgress(text = "合集「$name」导入完成：新增 $added 首")
+            _progress.value = ImportProgress(text = "合集「${target.title}」导入完成：新增 $added 首")
         }
     }
 
@@ -386,7 +404,15 @@ class ImportService(
                 text = "正在导入「" + name + "」…",
                 total = shared.s.size,
             )
-            val playlistId = store.createPlaylist(name, PlaylistSourceType.MANUAL)
+            // 分享链接每次都要新建歌单（不按来源复用），但同样要先解决重名：
+            // 覆盖 / 自动重命名 / 取消都由用户的对话框决定
+            val target = resolveImportPlaylist(
+                store = store,
+                conflicts = conflicts,
+                title = name,
+                sourceType = PlaylistSourceType.MANUAL,
+                reuseBySource = false,
+            ) ?: return@launch cancelImport(name)
             val songs = mutableListOf<NewSong>()
             val failed = mutableListOf<String>()
             shared.s.forEachIndexed { index, bvid ->
@@ -415,9 +441,10 @@ class ImportService(
                     current = index + 1,
                 )
             }
-            val added = if (songs.isEmpty()) 0 else store.addSongs(playlistId, songs)
+            val playlistId = target.commit(store, PlaylistSourceType.MANUAL)
+            val added = store.addSongs(playlistId, songs)
             _progress.value = ImportProgress(
-                text = "已导入「" + name + "」：" + added + " 首",
+                text = "已导入「" + target.title + "」：" + added + " 首",
                 error = if (failed.isEmpty()) null else
                     "有 " + failed.size + " 个没导入：" + failed.take(3).joinToString("、"),
             )

@@ -16,9 +16,12 @@ import com.bilimusic.app.data.remote.dto.UgcSeasonDto
 import com.bilimusic.app.data.remote.dto.ViewData
 import com.bilimusic.app.data.remote.dto.ViewPageDto
 import com.bilimusic.app.domain.model.AddSongResult
+import com.bilimusic.app.domain.model.DuplicateNameChoice
 import com.bilimusic.app.domain.model.FavFolder
 import com.bilimusic.app.domain.model.ImportProgress
 import com.bilimusic.app.domain.model.ImportReport
+import com.bilimusic.app.domain.model.PlaylistNameConflict
+import com.bilimusic.app.domain.model.PlaylistNaming
 import com.bilimusic.app.domain.model.PlaylistSourceType
 import com.bilimusic.app.domain.model.SongDraft
 import com.bilimusic.app.util.BiliLinkParser
@@ -43,17 +46,43 @@ interface ImportRepository {
     /** 拉取账号下的收藏夹列表 */
     suspend fun loadFavFolders(): ApiResult<List<FavFolder>>
 
-    /** 收藏夹 → 每个收藏夹一个歌单 */
-    fun importFavorites(folders: List<FavFolder>): Flow<ImportProgress>
+    /**
+     * 收藏夹 → 每个收藏夹一个歌单。
+     *
+     * [onNameConflict] 在「要新建的歌单和已有歌单重名」时挂起询问用户（覆盖 / 自动重命名 / 取消）；
+     * 返回 CANCEL 时整次导入中止，不写任何数据。默认值是「自动重命名」，方便测试等无 UI 调用方，
+     * UI 必须传入真正的交互 resolver。
+     */
+    fun importFavorites(
+        folders: List<FavFolder>,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice = {
+            DuplicateNameChoice.AUTO_RENAME
+        },
+    ): Flow<ImportProgress>
 
-    /** 稍后再看 → 一个歌单 */
-    fun importToView(): Flow<ImportProgress>
+    /** 稍后再看 → 一个歌单（[onNameConflict] 语义同 [importFavorites]） */
+    fun importToView(
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice = {
+            DuplicateNameChoice.AUTO_RENAME
+        },
+    ): Flow<ImportProgress>
 
-    /** UP 主投稿 → 一个歌单 */
-    fun importUploads(mid: Long, maxPages: Int = 10): Flow<ImportProgress>
+    /** UP 主投稿 → 一个歌单（[onNameConflict] 语义同 [importFavorites]） */
+    fun importUploads(
+        mid: Long,
+        maxPages: Int = 10,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice = {
+            DuplicateNameChoice.AUTO_RENAME
+        },
+    ): Flow<ImportProgress>
 
-    /** 合集 / 分P / 单曲（粘贴 BV、AV、链接）→ 导入成一个歌单 */
-    fun importByVideoInput(rawInput: String): Flow<ImportProgress>
+    /** 合集 / 分P / 单曲（粘贴 BV、AV、链接）→ 导入成一个歌单（[onNameConflict] 语义同 [importFavorites]） */
+    fun importByVideoInput(
+        rawInput: String,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice = {
+            DuplicateNameChoice.AUTO_RENAME
+        },
+    ): Flow<ImportProgress>
 
     /** 往已有歌单里加单曲（粘贴 BV / AV / 分享链接） */
     suspend fun addSongToPlaylist(playlistId: Long, rawInput: String): ApiResult<AddSongResult>
@@ -93,7 +122,10 @@ class ImportRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun importFavorites(folders: List<FavFolder>): Flow<ImportProgress> = flow {
+    override fun importFavorites(
+        folders: List<FavFolder>,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice,
+    ): Flow<ImportProgress> = flow {
         if (folders.isEmpty()) {
             emit(ImportProgress.Failed("请先勾选要导入的收藏夹"))
             return@flow
@@ -104,7 +136,11 @@ class ImportRepositoryImpl @Inject constructor(
                 title = folder.title,
                 type = PlaylistSourceType.FAV,
                 sourceId = folder.id.toString(),
-            )
+                onNameConflict = onNameConflict,
+            ) ?: run {
+                emit(ImportProgress.Failed(IMPORT_CANCELLED_MESSAGE))
+                return@flow
+            }
             val counters = Counters()
             var firstCover: String? = null
             var pageNumber = 1
@@ -204,7 +240,9 @@ class ImportRepositoryImpl @Inject constructor(
 
     // ---------------- 稍后再看 ----------------
 
-    override fun importToView(): Flow<ImportProgress> = flow {
+    override fun importToView(
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice,
+    ): Flow<ImportProgress> = flow {
         emit(ImportProgress.Preparing("正在读取稍后再看列表…"))
         throttle.await()
         when (val list = apiCall { api.toView() }) {
@@ -216,7 +254,15 @@ class ImportRepositoryImpl @Inject constructor(
                     emit(ImportProgress.Failed("稍后再看是空的，先去 B 站加几个视频吧"))
                     return@flow
                 }
-                val playlistId = obtainPlaylist("稍后再看", PlaylistSourceType.TOVIEW, "toview")
+                val playlistId = obtainPlaylist(
+                    "稍后再看",
+                    PlaylistSourceType.TOVIEW,
+                    "toview",
+                    onNameConflict,
+                ) ?: run {
+                    emit(ImportProgress.Failed(IMPORT_CANCELLED_MESSAGE))
+                    return@flow
+                }
                 val counters = Counters()
                 var firstCover: String? = null
                 items.forEachIndexed { index, item ->
@@ -253,7 +299,11 @@ class ImportRepositoryImpl @Inject constructor(
 
     // ---------------- UP 主投稿（高风险） ----------------
 
-    override fun importUploads(mid: Long, maxPages: Int): Flow<ImportProgress> = flow {
+    override fun importUploads(
+        mid: Long,
+        maxPages: Int,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice,
+    ): Flow<ImportProgress> = flow {
         emit(ImportProgress.Preparing("正在读取 UP 主投稿列表…"))
         val playlistTitle = "UP主投稿 $mid"
         var playlistId: Long? = null
@@ -294,8 +344,19 @@ class ImportRepositoryImpl @Inject constructor(
                     val list = data.list?.vlist.orEmpty()
                     if (list.isEmpty()) break
                     val pid = playlistId
-                        ?: obtainPlaylist(playlistTitle, PlaylistSourceType.UPLOAD, mid.toString())
-                            .also { playlistId = it }
+                        ?: run {
+                            val created = obtainPlaylist(
+                                playlistTitle,
+                                PlaylistSourceType.UPLOAD,
+                                mid.toString(),
+                                onNameConflict,
+                            ) ?: run {
+                                emit(ImportProgress.Failed(IMPORT_CANCELLED_MESSAGE))
+                                return@flow
+                            }
+                            playlistId = created
+                            created
+                        }
                     val total = (data.page?.count ?: list.size).coerceAtLeast(list.size)
 
                     list.forEachIndexed { index, item ->
@@ -340,7 +401,10 @@ class ImportRepositoryImpl @Inject constructor(
 
     // ---------------- 合集 / 分P / 单曲 ----------------
 
-    override fun importByVideoInput(rawInput: String): Flow<ImportProgress> = flow {
+    override fun importByVideoInput(
+        rawInput: String,
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice,
+    ): Flow<ImportProgress> = flow {
         emit(ImportProgress.Preparing("正在解析输入内容…"))
 
         // 歌单分享链接（bm://pl/v1/…）：解码出 bvid 列表后整单导入。
@@ -349,7 +413,15 @@ class ImportRepositoryImpl @Inject constructor(
         if (shared != null) {
             val title = shared.t.ifBlank { "分享的歌单" }
             emit(ImportProgress.Preparing("正在导入「" + title + "」…"))
-            val playlistId = obtainPlaylist(title, PlaylistSourceType.MANUAL, "share:" + title)
+            val playlistId = obtainPlaylist(
+                title,
+                PlaylistSourceType.MANUAL,
+                "share:" + title,
+                onNameConflict,
+            ) ?: run {
+                emit(ImportProgress.Failed(IMPORT_CANCELLED_MESSAGE))
+                return@flow
+            }
             val counters = Counters()
             var firstCover: String? = null
             shared.s.forEachIndexed { index, bvid ->
@@ -428,7 +500,15 @@ class ImportRepositoryImpl @Inject constructor(
             return@flow
         }
 
-        val playlistId = obtainPlaylist(playlistTitle, PlaylistSourceType.SEASON, sourceId)
+        val playlistId = obtainPlaylist(
+            playlistTitle,
+            PlaylistSourceType.SEASON,
+            sourceId,
+            onNameConflict,
+        ) ?: run {
+            emit(ImportProgress.Failed(IMPORT_CANCELLED_MESSAGE))
+            return@flow
+        }
         val counters = Counters()
         var firstCover: String? = null
         drafts.forEachIndexed { index, draft ->
@@ -493,14 +573,38 @@ class ImportRepositoryImpl @Inject constructor(
 
     // ---------------- 内部工具 ----------------
 
+    /**
+     * 拿到本次导入要写入的歌单 id：
+     * 1. 同一来源已经导入过 → 直接复用那个歌单（**不弹重名对话框**，保持增量去重行为）
+     * 2. 要新建的歌单和已有歌单重名 → 挂起等用户选「覆盖 / 自动重命名 / 取消」
+     * 3. 返回 null 表示用户取消：调用方必须中止整次导入，且不能写任何数据（包括已拉到的曲目）
+     */
     private suspend fun obtainPlaylist(
         title: String,
         type: PlaylistSourceType,
         sourceId: String,
-    ): Long {
+        onNameConflict: suspend (PlaylistNameConflict) -> DuplicateNameChoice,
+    ): Long? {
         val existing = playlistRepository.findPlaylistBySource(type, sourceId)
         if (existing != null) return existing.id
-        return playlistRepository.createPlaylistForSource(title, type, sourceId)
+
+        val desiredTitle = PlaylistNaming.normalize(title) ?: PlaylistNaming.FALLBACK_TITLE
+        val conflict = playlistRepository.findNameConflict(desiredTitle)
+        val resolvedTitle = if (conflict == null) {
+            desiredTitle
+        } else {
+            when (onNameConflict(conflict)) {
+                DuplicateNameChoice.OVERWRITE -> {
+                    // 覆盖 = 先删同名旧歌单（外键 CASCADE 连曲目一起删），再用原名新建
+                    playlistRepository.deleteByTitle(conflict.existingTitle)
+                    conflict.desiredTitle
+                }
+
+                DuplicateNameChoice.AUTO_RENAME -> conflict.suggestedTitle
+                DuplicateNameChoice.CANCEL -> return null
+            }
+        }
+        return playlistRepository.createPlaylistForSource(resolvedTitle, type, sourceId)
     }
 
     private suspend fun finishPlaylist(playlistId: Long, coverUrl: String?) {
@@ -683,5 +787,8 @@ class ImportRepositoryImpl @Inject constructor(
 
     private companion object {
         const val PAGE_SIZE = 20
+
+        /** 用户在重名对话框里点「取消」时，整次导入中止并提示这句 */
+        const val IMPORT_CANCELLED_MESSAGE = "已取消导入"
     }
 }

@@ -50,6 +50,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bilimusic.app.domain.model.Playlist
 import com.bilimusic.app.ui.components.ConfirmDialog
+import com.bilimusic.app.ui.components.DuplicateNameDialog
 import com.bilimusic.app.ui.components.EmptyState
 import com.bilimusic.app.ui.components.LoadingState
 import com.bilimusic.app.ui.components.TextInputDialog
@@ -67,6 +68,7 @@ fun PlaylistListScreen(
     viewModel: PlaylistListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingConflict by viewModel.pendingConflict.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -175,6 +177,15 @@ fun PlaylistListScreen(
                 viewModel.deletePlaylist(target)
             },
             onDismiss = { deleteTarget = null },
+        )
+    }
+
+    // 新建 / 重命名碰到重名：覆盖 / 自动重命名 / 取消
+    pendingConflict?.let { conflict ->
+        DuplicateNameDialog(
+            conflict = conflict,
+            onChoose = viewModel::resolveDuplicate,
+            onDismiss = viewModel::dismissDuplicateDialog,
         )
     }
 }

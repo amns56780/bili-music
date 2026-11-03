@@ -39,6 +39,8 @@ class LocalMusicController(
     private val scanner: LocalMusicScanner,
     private val store: PlaylistStore,
     private val scope: CoroutineScope,
+    /** 建「本地音乐」歌单撞上重名时问用户（与网络导入共用一个 resolver） */
+    private val conflicts: PlaylistConflictResolver,
 ) {
 
     companion object {
@@ -137,12 +139,21 @@ class LocalMusicController(
         }
     }
 
-    /** 导入到「本地音乐」歌单（复用同一个，不重复建）；返回该歌单 id */
-    fun importToLocalPlaylist(files: List<LocalAudioFile>): Long? {
+    /**
+     * 导入到「本地音乐」歌单（复用同一个，不重复建）；返回该歌单 id。
+     *
+     * 和目标歌单的协商（重名时弹「覆盖 / 自动重命名 / 取消」）是 suspend 的：
+     * 用户点完对话框才回来，取消则返回 null 并且什么都不写。
+     */
+    suspend fun importToLocalPlaylist(files: List<LocalAudioFile>): Long? {
         if (files.isEmpty()) return null
         val title = LOCAL_PLAYLIST_TITLE
-        val playlistId = store.findBySource(PlaylistSourceType.MANUAL, title)?.id
-            ?: store.createPlaylist(title, PlaylistSourceType.MANUAL)
+        val target = resolveImportPlaylist(store, conflicts, title, PlaylistSourceType.MANUAL)
+            ?: run {
+                _state.value = _state.value.copy(message = "已取消导入「$title」")
+                return null
+            }
+        val playlistId = target.commit(store, PlaylistSourceType.MANUAL)
         val added = store.addSongs(
             playlistId,
             files.map { file ->
@@ -156,7 +167,7 @@ class LocalMusicController(
                 )
             },
         )
-        _state.value = _state.value.copy(message = "已导入「$title」：新增 $added 首（重复的自动跳过）")
+        _state.value = _state.value.copy(message = "已导入「" + target.title + "」：新增 $added 首（重复的自动跳过）")
         return playlistId
     }
 

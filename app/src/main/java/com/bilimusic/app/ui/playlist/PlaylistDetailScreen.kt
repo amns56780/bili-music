@@ -84,6 +84,7 @@ import com.bilimusic.app.data.repository.DownloadStatus
 import com.bilimusic.app.domain.model.Song
 import com.bilimusic.app.domain.model.formatDuration
 import com.bilimusic.app.ui.components.ConfirmDialog
+import com.bilimusic.app.ui.components.DuplicateNameDialog
 import com.bilimusic.app.ui.components.EmptyState
 import com.bilimusic.app.ui.components.LoadingState
 import com.bilimusic.app.ui.components.TextInputDialog
@@ -270,6 +271,7 @@ fun PlaylistDetailScreen(
     viewModel: PlaylistDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingConflict by viewModel.pendingConflict.collectAsStateWithLifecycle()
     val downloadStates by viewModel.downloadStates.collectAsStateWithLifecycle()
     val selectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
     val selectedSongIds by viewModel.selectedSongIds.collectAsStateWithLifecycle()
@@ -622,6 +624,15 @@ fun PlaylistDetailScreen(
             onValueChange = viewModel::onAddSongInputChange,
             onConfirm = viewModel::submitAddSong,
             onDismiss = viewModel::closeAddSongDialog,
+        )
+    }
+
+    // 重命名碰到重名：覆盖 / 自动重命名 / 取消
+    pendingConflict?.let { conflict ->
+        DuplicateNameDialog(
+            conflict = conflict,
+            onChoose = viewModel::resolveDuplicate,
+            onDismiss = viewModel::dismissDuplicateDialog,
         )
     }
 }

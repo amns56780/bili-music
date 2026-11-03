@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bilimusic.app.domain.model.ImportReport
+import com.bilimusic.app.ui.components.DuplicateNameDialog
 import com.bilimusic.app.ui.components.EmptyState
 import com.bilimusic.app.ui.components.ErrorState
 import com.bilimusic.app.ui.components.LoadingState
@@ -72,6 +73,7 @@ fun ImportScreen(
     viewModel: ImportViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingConflict by viewModel.pendingConflict.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
@@ -134,6 +136,15 @@ fun ImportScreen(
                 )
             }
         }
+    }
+
+    // 导入的歌单和已有歌单重名：挂起导入流程，等用户选「覆盖 / 自动重命名 / 取消」
+    pendingConflict?.let { conflict ->
+        DuplicateNameDialog(
+            conflict = conflict,
+            onChoose = viewModel::resolveDuplicate,
+            onDismiss = viewModel::dismissDuplicateDialog,
+        )
     }
 }
 

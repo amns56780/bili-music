@@ -6,7 +6,10 @@ import com.bilimusic.app.data.local.dao.SongDao
 import com.bilimusic.app.data.local.entity.PlaylistEntity
 import com.bilimusic.app.data.local.entity.SongEntity
 import com.bilimusic.app.data.local.entity.toDomain
+import com.bilimusic.app.domain.model.ExistingPlaylistTitle
 import com.bilimusic.app.domain.model.Playlist
+import com.bilimusic.app.domain.model.PlaylistNameConflict
+import com.bilimusic.app.domain.model.PlaylistNaming
 import com.bilimusic.app.domain.model.PlaylistSourceType
 import com.bilimusic.app.domain.model.Song
 import com.bilimusic.app.domain.model.SongDraft
@@ -58,8 +61,30 @@ interface PlaylistRepository {
 
     suspend fun removeSong(songId: Long)
     suspend fun clearSongs(playlistId: Long)
-    suspend fun playlistTitleExists(title: String): Boolean
     suspend fun songCount(playlistId: Long): Int
+
+    // ---------------- 歌单重名处理（规则统一走 shared 的 PlaylistNaming） ----------------
+
+    /**
+     * 歌单名是否已存在。
+     *
+     * 用 PlaylistNaming.normalize 做规范化比较（首尾空白、全角/半角括号），
+     * 所以 SQL 的精确匹配会漏掉「收藏夹（2）」vs「收藏夹 (2)」，这里统一拉全部标题在内存里比较。
+     * [exceptId] 用于重命名：排除当前歌单自己。
+     */
+    suspend fun playlistTitleExists(title: String, exceptId: Long? = null): Boolean
+
+    /** 按标题查找歌单（规范化比较）；找不到返回 null */
+    suspend fun findByTitle(title: String): Playlist?
+
+    /** 删除与 [title] 同名的歌单（连同其曲目，外键 CASCADE），返回被删歌单；没找到返回 null */
+    suspend fun deleteByTitle(title: String): Playlist?
+
+    /**
+     * 直接查重并构造对话框需要的上下文（旧歌单曲目数、自动重命名建议名）。
+     * 无冲突返回 null；[exceptId] 用于重命名时排除当前歌单自己。
+     */
+    suspend fun findNameConflict(desired: String, exceptId: Long? = null): PlaylistNameConflict?
 
     /** 按来源查找歌单（重复导入同一个收藏夹/合集时复用） */
     suspend fun findPlaylistBySource(type: PlaylistSourceType, sourceId: String): Playlist?
@@ -114,7 +139,7 @@ class PlaylistRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         return playlistDao.insert(
             PlaylistEntity(
-                title = title.trim(),
+                title = PlaylistNaming.normalize(title) ?: PlaylistNaming.FALLBACK_TITLE,
                 coverUrl = null,
                 sourceType = PlaylistSourceType.MANUAL,
                 sourceId = null,
@@ -125,7 +150,8 @@ class PlaylistRepositoryImpl @Inject constructor(
     }
 
     override suspend fun renamePlaylist(playlistId: Long, title: String) {
-        playlistDao.rename(playlistId, title.trim())
+        // 落库前统一规范化，保证和 PlaylistNaming 的判重口径一致
+        playlistDao.rename(playlistId, PlaylistNaming.normalize(title) ?: title.trim())
     }
 
     override suspend fun deletePlaylist(playlistId: Long) {
@@ -145,7 +171,7 @@ class PlaylistRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         return playlistDao.insert(
             PlaylistEntity(
-                title = title.trim().ifBlank { sourceType.displayName },
+                title = PlaylistNaming.normalize(title) ?: sourceType.displayName,
                 coverUrl = coverUrl,
                 sourceType = sourceType,
                 sourceId = sourceId,
@@ -244,8 +270,49 @@ class PlaylistRepositoryImpl @Inject constructor(
         songDao.deleteByPlaylist(playlistId)
     }
 
-    override suspend fun playlistTitleExists(title: String): Boolean =
-        playlistDao.getByTitle(title.trim()) != null
+    override suspend fun playlistTitleExists(title: String, exceptId: Long?): Boolean {
+        val desired = PlaylistNaming.normalize(title) ?: return false
+        return playlistDao.getAll().any { playlist ->
+            (exceptId == null || playlist.id != exceptId) &&
+                PlaylistNaming.normalize(playlist.title) == desired
+        }
+    }
+
+    override suspend fun findByTitle(title: String): Playlist? {
+        val desired = PlaylistNaming.normalize(title) ?: return null
+        return playlistDao.getAll()
+            .firstOrNull { PlaylistNaming.normalize(it.title) == desired }
+            ?.toDomain()
+    }
+
+    override suspend fun deleteByTitle(title: String): Playlist? {
+        val desired = PlaylistNaming.normalize(title) ?: return null
+        // 历史上可能有「收藏夹（2）」和「收藏夹 (2)」这种规范化后同名的脏数据，一起删掉，
+        // 否则「覆盖」之后仍然存在同名歌单。
+        val matches = playlistDao.getAll().filter { PlaylistNaming.normalize(it.title) == desired }
+        if (matches.isEmpty()) return null
+        matches.forEach { playlistDao.deleteById(it.id) }
+        return matches.first().toDomain()
+    }
+
+    override suspend fun findNameConflict(desired: String, exceptId: Long?): PlaylistNameConflict? {
+        val title = PlaylistNaming.normalize(desired) ?: return null
+        val all = playlistDao.getAll()
+        val candidates = all.filter { exceptId == null || it.id != exceptId }
+        val match = candidates.firstOrNull { PlaylistNaming.normalize(it.title) == title } ?: return null
+        // 只为「将被覆盖」的那个歌单查曲目数，避免每次查重都 N+1
+        return PlaylistNaming.findConflict(
+            title,
+            candidates.map {
+                ExistingPlaylistTitle(
+                    title = it.title,
+                    songCount = if (it.id == match.id) songDao.countInPlaylist(it.id) else 0,
+                )
+            },
+            // 重命名时把自己现名也算作建议名的占用，避免「建议名 = 现名」选了等于没改
+            extraSuggestionTitles = all.filter { it.id == exceptId }.map { it.title },
+        )
+    }
 
     override suspend fun songCount(playlistId: Long): Int = songDao.countInPlaylist(playlistId)
 

@@ -54,6 +54,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.selection.SelectionContainer
+import com.bilimusic.app.domain.model.DuplicateNameChoice
+import com.bilimusic.app.domain.model.ExistingPlaylistTitle
+import com.bilimusic.app.domain.model.PlaylistNameConflict
+import com.bilimusic.app.domain.model.PlaylistNaming
 import com.bilimusic.app.util.PlaylistShareCodec
 import com.bilimusic.desktop.data.StoredPlaylist
 import com.bilimusic.desktop.data.StoredSong
@@ -74,13 +78,16 @@ fun PlaylistPage(
     playlist: StoredPlaylist?,
     songs: List<StoredSong>,
     playlists: List<StoredPlaylist>,
+    /** 各歌单曲目数：重命名撞车时对话框要显示「旧歌单有多少首」 */
+    songCounts: Map<Long, Int>,
     isCurrent: (StoredSong) -> Boolean,
     onPlayAll: () -> Unit,
     onPlayAt: (Int) -> Unit,
     onCopyTo: (Long, Set<Long>) -> Unit,
     onMoveTo: (Long, Set<Long>) -> Unit,
     onRemoveSongs: (Set<Long>) -> Unit,
-    onRename: (Long, String) -> Unit,
+    /** 重命名歌单；(id, title, overwrite) —— overwrite=true 表示删掉另一个同名歌单后再改名 */
+    onRename: (Long, String, Boolean) -> Unit,
     onDelete: (Long) -> Unit,
     onSetCoverUrl: (Long, String?) -> Unit,
     onSetCoverFile: (Long) -> Unit,
@@ -98,6 +105,8 @@ fun PlaylistPage(
     var copyMenu by remember { mutableStateOf(false) }
     var moveMenu by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    // 重命名撞上重名：挂起等用户选择（覆盖 / 自动重命名 / 取消）
+    var renameConflict by remember { mutableStateOf<PlaylistNameConflict?>(null) }
     var showDelete by remember { mutableStateOf(false) }
     var showCoverPicker by remember { mutableStateOf(false) }
     var showRemove by remember { mutableStateOf(false) }
@@ -358,8 +367,39 @@ fun PlaylistPage(
             confirmText = "保存",
             onDismiss = { showRename = false },
             onConfirm = { text ->
-                if (text.isNotBlank()) onRename(pl.id, text.trim())
+                val title = PlaylistNaming.normalize(text)
+                // 名字没变（或只差首尾空白）就直接当作无操作
+                if (title != null && title != PlaylistNaming.normalize(pl.title)) {
+                    val others = playlists
+                        .filter { it.id != pl.id }
+                        .map { ExistingPlaylistTitle(it.title, songCounts[it.id] ?: 0) }
+                    // 建议名要把自己现在的名字也算进去：否则「X (2) 改成 X」会建议成 X (2)，选了等于没改
+                    val conflict = PlaylistNaming.findConflict(
+                        title,
+                        others,
+                        extraSuggestionTitles = listOf(pl.title),
+                    )
+                    if (conflict == null) {
+                        onRename(pl.id, title, false)
+                    } else {
+                        renameConflict = conflict
+                    }
+                }
                 showRename = false
+            },
+        )
+    }
+
+    renameConflict?.let { conflict ->
+        DuplicatePlaylistNameDialog(
+            conflict = conflict,
+            overwriteHint = "覆盖会删除它，再把当前歌单改名为「" + conflict.desiredTitle + "」",
+            onChoice = { choice ->
+                val finalTitle = PlaylistNaming.resolveConflict(conflict, choice)
+                renameConflict = null
+                if (finalTitle != null) {
+                    onRename(pl.id, finalTitle, choice == DuplicateNameChoice.OVERWRITE)
+                }
             },
         )
     }

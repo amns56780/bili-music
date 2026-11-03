@@ -50,17 +50,20 @@ import com.bilimusic.desktop.data.ImportService
 import com.bilimusic.desktop.data.LocalMusicController
 import com.bilimusic.desktop.data.LocalMusicScanner
 import com.bilimusic.desktop.data.PlaylistStore
+import com.bilimusic.desktop.data.UiPlaylistConflictResolver
 import com.bilimusic.desktop.media.MediaOpener
 import com.bilimusic.desktop.player.GlobalHotkeys
 import com.bilimusic.desktop.player.PlaybackController
 import com.bilimusic.desktop.player.SleepTimer
 import com.bilimusic.desktop.player.Track
 import com.bilimusic.desktop.ui.AppTitleBar
+import com.bilimusic.desktop.ui.DuplicatePlaylistNameDialog
 import com.bilimusic.desktop.ui.HomeScreen
 import com.bilimusic.desktop.ui.LoginScreen
 import com.bilimusic.desktop.ui.theme.BmTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import com.bilimusic.desktop.ui.rememberRemoteImage
+import kotlinx.coroutines.launch
 
 /**
  * bilimusic Windows 桌面版入口。
@@ -353,6 +356,8 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
         )
     }.getOrNull()
     val store = PlaylistStore()
+    // 歌单重名询问器：导入 / 本地导入在协程里挂起，等用户点「覆盖 / 自动重命名 / 取消」
+    val conflicts = UiPlaylistConflictResolver()
     // 系统级全局媒体键：注册到 Win32（被占用时只记日志，不影响使用）
     val hotkeys = playback?.let { player ->
         runCatching {
@@ -376,13 +381,14 @@ private fun rememberDesktopApp(scope: kotlinx.coroutines.CoroutineScope): Deskto
         client = client,
         auth = auth,
         store = store,
-        importer = ImportService(client, store, scope),
-        localMusic = LocalMusicController(LocalMusicScanner(), store, scope),
+        importer = ImportService(client, store, scope, conflicts),
+        localMusic = LocalMusicController(LocalMusicScanner(), store, scope, conflicts),
         downloads = downloads,
         playback = playback,
         opener = playback?.let { MediaOpener(client, it, scope) },
         sleepTimer = sleepTimer,
         hotkeys = hotkeys,
+        conflicts = conflicts,
     )
 }
 
@@ -437,6 +443,8 @@ private class DesktopApp(
     val sleepTimer: SleepTimer,
     /** 系统级全局媒体键（注册失败时为 null，不影响其它功能） */
     val hotkeys: GlobalHotkeys?,
+    /** 歌单重名询问器：导入协程挂起等 Compose 对话框上的用户选择 */
+    val conflicts: UiPlaylistConflictResolver,
 )
 
 @Composable
@@ -446,10 +454,14 @@ private fun BiliMusicDesktopApp(
     onToggleFullscreen: () -> Unit,
 ) {
     LaunchedEffect(app) { app.auth.bootstrap() }
+    // 本地音乐导入现在是 suspend 的（可能弹重名对话框），需要 UI 协程作用域
+    val uiScope = rememberCoroutineScope()
 
     DesktopTheme(app.client.okHttpClient) {
         Surface(modifier = Modifier.fillMaxSize()) {
             val authState by app.auth.state.collectAsState()
+            // 导入 / 本地导入遇到歌单重名时挂在这里，由下面的对话框接管
+            val pendingConflict by app.conflicts.pending.collectAsState()
             // 本地优先：不强制登录。默认直接进主界面（本地音乐随便听），
             // 只有要点网络歌单/在线播放时才引导登录。
             var showLogin by remember { mutableStateOf(false) }
@@ -532,8 +544,15 @@ private fun BiliMusicDesktopApp(
                             onOpenInput = { text -> app.opener?.open(text) },
                             onLogout = app.auth::logout,
                             onSelectPlaylist = { selectedPlaylistId = it },
-                            onCreatePlaylist = { title ->
-                                selectedPlaylistId = app.store.createPlaylist(title)
+                            onCreatePlaylist = { title, overwrite ->
+                                // overwrite = 用户选了「覆盖」：先删同名旧歌单再建；否则直接建
+                                selectedPlaylistId = if (overwrite) {
+                                    app.store.createPlaylistOverwriting(title).also {
+                                        playback.reportError("已覆盖同名歌单「" + title + "」")
+                                    }
+                                } else {
+                                    app.store.createPlaylist(title)
+                                }
                             },
                             onLoadFavFolders = {
                                 authState.account?.let { account ->
@@ -627,8 +646,11 @@ private fun BiliMusicDesktopApp(
                                 )
                             },
                             onImportLocal = { files ->
-                                app.localMusic.importToLocalPlaylist(files)?.let { id ->
-                                    selectedPlaylistId = id
+                                // 可能弹重名对话框，所以放到协程里等用户选完
+                                uiScope.launch {
+                                    app.localMusic.importToLocalPlaylist(files)?.let { id ->
+                                        selectedPlaylistId = id
+                                    }
                                 }
                             },
                             onDismissLocalMusic = { showLocalMusic = false },
@@ -682,9 +704,14 @@ private fun BiliMusicDesktopApp(
                                 }
                             },
                             onRequestLogin = { showLogin = true },
-                            onRenamePlaylist = { id, title ->
-                                app.store.renamePlaylist(id, title)
-                                playback.reportError("歌单已重命名")
+                            onRenamePlaylist = { id, title, overwrite ->
+                                if (overwrite) {
+                                    app.store.renamePlaylistOverwriting(id, title)
+                                    playback.reportError("已覆盖同名歌单「" + title + "」")
+                                } else {
+                                    app.store.renamePlaylist(id, title)
+                                    playback.reportError("歌单已重命名")
+                                }
                             },
                             onDeletePlaylist = { id ->
                                 app.store.deletePlaylist(id)
@@ -745,6 +772,15 @@ private fun BiliMusicDesktopApp(
 )
                     }
                 }
+            }
+
+            // 歌单重名对话框（导入 / 本地导入在协程里挂起等这个结果）
+            pendingConflict?.let { conflict ->
+                DuplicatePlaylistNameDialog(
+                    conflict = conflict,
+                    overwriteHint = "覆盖会删除它并重新导入",
+                    onChoice = { choice -> app.conflicts.answer(choice) },
+                )
             }
         }
     }

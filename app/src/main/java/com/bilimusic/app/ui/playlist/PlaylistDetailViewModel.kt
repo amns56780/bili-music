@@ -10,7 +10,10 @@ import com.bilimusic.app.data.repository.DownloadRepository
 import com.bilimusic.app.data.repository.DownloadStatus
 import com.bilimusic.app.data.repository.ImportRepository
 import com.bilimusic.app.data.repository.PlaylistRepository
+import com.bilimusic.app.domain.model.DuplicateNameChoice
 import com.bilimusic.app.domain.model.Playlist
+import com.bilimusic.app.domain.model.PlaylistNameConflict
+import com.bilimusic.app.domain.model.PlaylistNaming
 import com.bilimusic.app.domain.model.Song
 import com.bilimusic.app.ui.navigation.Routes
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -100,6 +103,18 @@ class PlaylistDetailViewModel @Inject constructor(
 
     private val _events = Channel<PlaylistDetailEvent>(Channel.BUFFERED)
     val events: Flow<PlaylistDetailEvent> = _events.receiveAsFlow()
+
+    /** 重名对话框的挂起 resolver（重命名用） */
+    private val duplicateNameResolver = DuplicateNameResolver()
+
+    /** 重命名碰到重名时为非 null；Screen 用它显示覆盖 / 自动重命名 / 取消 */
+    val pendingConflict: StateFlow<PlaylistNameConflict?> = duplicateNameResolver.pendingConflict
+
+    /** 对话框里点了某个选项 */
+    fun resolveDuplicate(choice: DuplicateNameChoice) = duplicateNameResolver.resolve(choice)
+
+    /** 对话框被返回键 / 点击外部关掉 */
+    fun dismissDuplicateDialog() = duplicateNameResolver.dismissAsCancelled()
 
     private val _addSongState = MutableStateFlow(AddSongUiState())
     val addSongState: StateFlow<AddSongUiState> = _addSongState.asStateFlow()
@@ -327,21 +342,39 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun renamePlaylist(rawTitle: String) {
-        val title = rawTitle.trim()
+        val title = PlaylistNaming.normalize(rawTitle)
         viewModelScope.launch {
-            val current = repository.getPlaylist(playlistId)
-            when {
-                current == null -> _events.send(PlaylistDetailEvent.Message("歌单不存在或已被删除"))
-                title.isEmpty() -> _events.send(PlaylistDetailEvent.Message("歌单名不能为空"))
-                current.title == title -> _events.send(PlaylistDetailEvent.Message("歌单名没有变化"))
-                repository.playlistTitleExists(title) ->
-                    _events.send(PlaylistDetailEvent.Message("已存在同名歌单「$title」"))
-
-                else -> {
-                    repository.renamePlaylist(playlistId, title)
-                    _events.send(PlaylistDetailEvent.Message("已重命名为「$title」"))
-                }
+            if (title == null) {
+                _events.send(PlaylistDetailEvent.Message("歌单名不能为空"))
+                return@launch
             }
+            val current = repository.getPlaylist(playlistId)
+            if (current == null) {
+                _events.send(PlaylistDetailEvent.Message("歌单不存在或已被删除"))
+                return@launch
+            }
+            if (PlaylistNaming.normalize(current.title) == title) {
+                _events.send(PlaylistDetailEvent.Message("歌单名没有变化"))
+                return@launch
+            }
+            val resolved = duplicateNameResolver.resolveTitleForWrite(
+                desiredTitle = title,
+                findConflict = { repository.findNameConflict(it, exceptId = playlistId) },
+                overwrite = { repository.deleteByTitle(it.existingTitle) },
+            ) ?: run {
+                _events.send(PlaylistDetailEvent.Message("已取消重命名"))
+                return@launch
+            }
+            repository.renamePlaylist(playlistId, resolved.title)
+            _events.send(
+                PlaylistDetailEvent.Message(
+                    if (resolved.overwritten) {
+                        "已覆盖同名歌单，重命名为「${resolved.title}」"
+                    } else {
+                        "已重命名为「${resolved.title}」"
+                    },
+                ),
+            )
         }
     }
 

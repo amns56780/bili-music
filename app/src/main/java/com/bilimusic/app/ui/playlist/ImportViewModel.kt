@@ -4,9 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bilimusic.app.data.remote.ApiResult
 import com.bilimusic.app.data.repository.ImportRepository
+import com.bilimusic.app.domain.model.DuplicateNameChoice
 import com.bilimusic.app.domain.model.FavFolder
 import com.bilimusic.app.domain.model.ImportProgress
 import com.bilimusic.app.domain.model.ImportReport
+import com.bilimusic.app.domain.model.PlaylistNameConflict
 import com.bilimusic.app.util.BiliLinkParser
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -60,6 +62,18 @@ class ImportViewModel @Inject constructor(
     val messages: Flow<String> = _messages.receiveAsFlow()
 
     private var importJob: Job? = null
+
+    /** 导入碰上歌单重名时，挂起等待用户在对话框里选择 */
+    private val duplicateNameResolver = DuplicateNameResolver()
+
+    /** 导入过程中需要弹「歌单重名」对话框时非 null */
+    val pendingConflict: StateFlow<PlaylistNameConflict?> = duplicateNameResolver.pendingConflict
+
+    /** 对话框里点了某个选项：唤醒挂起中的导入协程 */
+    fun resolveDuplicate(choice: DuplicateNameChoice) = duplicateNameResolver.resolve(choice)
+
+    /** 对话框被返回键 / 点击外部关掉：按取消处理 */
+    fun dismissDuplicateDialog() = duplicateNameResolver.dismissAsCancelled()
 
     init {
         loadFavFolders()
@@ -115,14 +129,23 @@ class ImportViewModel @Inject constructor(
             return
         }
         _uiState.update { it.copy(lastTitle = "收藏夹导入") }
-        runImport(importRepository.importFavorites(selected))
+        runImport(
+            importRepository.importFavorites(
+                folders = selected,
+                onNameConflict = { duplicateNameResolver.awaitChoice(it) },
+            ),
+        )
     }
 
     // ---------------- 稍后再看 ----------------
 
     fun startImportToView() {
         _uiState.update { it.copy(lastTitle = "稍后再看") }
-        runImport(importRepository.importToView())
+        runImport(
+            importRepository.importToView(
+                onNameConflict = { duplicateNameResolver.awaitChoice(it) },
+            ),
+        )
     }
 
     // ---------------- UP 主投稿 ----------------
@@ -143,7 +166,12 @@ class ImportViewModel @Inject constructor(
             return
         }
         _uiState.update { it.copy(lastTitle = "UP主投稿") }
-        runImport(importRepository.importUploads(mid))
+        runImport(
+            importRepository.importUploads(
+                mid = mid,
+                onNameConflict = { duplicateNameResolver.awaitChoice(it) },
+            ),
+        )
     }
 
     // ---------------- 合集 / 分P ----------------
@@ -159,16 +187,25 @@ class ImportViewModel @Inject constructor(
             return
         }
         _uiState.update { it.copy(lastTitle = "合集 / 分P 导入") }
-        runImport(importRepository.importByVideoInput(raw))
+        runImport(
+            importRepository.importByVideoInput(
+                rawInput = raw,
+                onNameConflict = { duplicateNameResolver.awaitChoice(it) },
+            ),
+        )
     }
 
     // ---------------- 公共 ----------------
 
     fun cancelImport() {
+        // 导入可能正卡在重名对话框上（导入协程挂在 awaitChoice）：先取消任务再收掉对话框，
+        // 避免只关掉弹窗、协程却永远挂着。
         val job = importJob
-        if (job == null || !job.isActive) return
-        job.cancel()
-        importJob = null
+        if (job != null && job.isActive) {
+            job.cancel()
+            importJob = null
+        }
+        duplicateNameResolver.dismissAsCancelled()
         _uiState.update { it.copy(running = false, progressText = "") }
         viewModelScope.launch { _messages.send("已取消导入（已导入的部分会保留）") }
     }

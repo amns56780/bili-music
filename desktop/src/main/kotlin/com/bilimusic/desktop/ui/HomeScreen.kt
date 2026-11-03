@@ -69,7 +69,7 @@ fun HomeScreen(
     onOpenInput: (String) -> Unit,
     onLogout: () -> Unit,
     onSelectPlaylist: (Long) -> Unit,
-    onCreatePlaylist: (String) -> Unit,
+    onCreatePlaylist: (String, Boolean) -> Unit,
     onLoadFavFolders: () -> Unit,
     onImportFolder: (Long, String) -> Unit,
     onImportToView: () -> Unit,
@@ -98,7 +98,7 @@ fun HomeScreen(
     onImportBvids: (String) -> Unit,
     onImportShareLink: (String) -> Unit,
     onRequestLogin: () -> Unit,
-    onRenamePlaylist: (Long, String) -> Unit,
+    onRenamePlaylist: (Long, String, Boolean) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
     onSetCoverUrl: (Long, String?) -> Unit,
     onSetCoverFile: (Long) -> Unit,
@@ -157,6 +157,7 @@ fun HomeScreen(
                     playlist = selectedPlaylist,
                     songs = songs,
                     playlists = playlists,
+                    songCounts = songCounts,
                     isCurrent = { song ->
                         val current = playback.current
                         current != null && current.bvid == song.bvid && current.cid == song.cid

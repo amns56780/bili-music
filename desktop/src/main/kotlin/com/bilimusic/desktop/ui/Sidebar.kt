@@ -47,6 +47,10 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bilimusic.app.data.remote.dto.FavFolderDto
+import com.bilimusic.app.domain.model.DuplicateNameChoice
+import com.bilimusic.app.domain.model.ExistingPlaylistTitle
+import com.bilimusic.app.domain.model.PlaylistNameConflict
+import com.bilimusic.app.domain.model.PlaylistNaming
 import com.bilimusic.desktop.auth.AuthUiState
 import com.bilimusic.desktop.data.ImportProgress
 import com.bilimusic.desktop.data.StoredPlaylist
@@ -71,7 +75,8 @@ fun Sidebar(
     progress: ImportProgress?,
     favFolders: List<FavFolderDto>,
     onSelect: (Long) -> Unit,
-    onCreate: (String) -> Unit,
+    /** 新建歌单；(title, overwrite) —— overwrite=true 表示用户选了「覆盖」 */
+    onCreate: (String, Boolean) -> Unit,
     onRequestLogin: () -> Unit,
     onLogout: () -> Unit,
     onOpenLocalMusic: () -> Unit,
@@ -88,6 +93,8 @@ fun Sidebar(
     onOpenInput: (String) -> Unit,
 ) {
     var showCreate by remember { mutableStateOf(false) }
+    // 新建歌单时撞上重名：先挂起，等用户在重名对话框里选完再创建
+    var createConflict by remember { mutableStateOf<PlaylistNameConflict?>(null) }
     var showFavPicker by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
     var showSeason by remember { mutableStateOf(false) }
@@ -243,8 +250,34 @@ fun Sidebar(
             onDismiss = { showCreate = false },
             confirmText = "创建",
             onConfirm = { text ->
-                if (text.isNotBlank()) onCreate(text.trim())
+                // 统一用共享层规范化（trim / 结尾 (n) 半角化），重名比较也基于它
+                val title = PlaylistNaming.normalize(text)
+                if (title != null) {
+                    val existing = playlists.map {
+                        ExistingPlaylistTitle(it.title, songCounts[it.id] ?: 0)
+                    }
+                    val conflict = PlaylistNaming.findConflict(title, existing)
+                    if (conflict == null) {
+                        onCreate(title, false)
+                    } else {
+                        // 先不创建，弹重名对话框让用户决定
+                        createConflict = conflict
+                    }
+                }
                 showCreate = false
+            },
+        )
+    }
+
+    createConflict?.let { conflict ->
+        DuplicatePlaylistNameDialog(
+            conflict = conflict,
+            onChoice = { choice ->
+                val finalTitle = PlaylistNaming.resolveConflict(conflict, choice)
+                createConflict = null
+                if (finalTitle != null) {
+                    onCreate(finalTitle, choice == DuplicateNameChoice.OVERWRITE)
+                }
             },
         )
     }
