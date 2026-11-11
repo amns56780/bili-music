@@ -284,6 +284,9 @@ fun PlaylistDetailScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<Song?>(null) }
+    // 下载前先确认：单曲 / 整单各一个
+    var downloadTarget by remember { mutableStateOf<Song?>(null) }
+    var confirmDownloadAll by remember { mutableStateOf(false) }
     var showCoverPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
@@ -328,7 +331,7 @@ fun PlaylistDetailScreen(
                 actions = {
                     // FR-9：整单离线下载
                     IconButton(
-                        onClick = viewModel::downloadAll,
+                        onClick = { confirmDownloadAll = true },
                         enabled = uiState.songs.isNotEmpty(),
                     ) {
                         Icon(Icons.Outlined.DownloadForOffline, contentDescription = "全部下载")
@@ -468,7 +471,7 @@ fun PlaylistDetailScreen(
                                 onOpenCollection = {
                                     song.collectionKey?.let(onOpenCollection)
                                 },
-                                onDownload = { viewModel.downloadSong(song) },
+                                onDownload = { downloadTarget = song },
                                 onRemoveDownload = { viewModel.removeDownload(song) },
                                 onRemove = { removeTarget = song },
                             )
@@ -601,6 +604,32 @@ fun PlaylistDetailScreen(
                 viewModel.deletePlaylist()
             },
             onDismiss = { showDeleteDialog = false },
+        )
+    }
+
+    downloadTarget?.let { song ->
+        ConfirmDialog(
+            title = "下载到本地",
+            message = "确定下载「" + song.title + "」吗？会占用手机存储空间，下载后可离线播放。",
+            confirmLabel = "下载",
+            onConfirm = {
+                downloadTarget = null
+                viewModel.downloadSong(song)
+            },
+            onDismiss = { downloadTarget = null },
+        )
+    }
+
+    if (confirmDownloadAll) {
+        ConfirmDialog(
+            title = "下载整个歌单",
+            message = "确定下载当前歌单的全部 " + uiState.songs.size + " 首吗？会占用较多存储空间。",
+            confirmLabel = "全部下载",
+            onConfirm = {
+                confirmDownloadAll = false
+                viewModel.downloadAll()
+            },
+            onDismiss = { confirmDownloadAll = false },
         )
     }
 

@@ -235,7 +235,14 @@ class PlaybackConnection @Inject constructor(
                 songIdByMediaKey[song.mediaKey] = song.id
             }
             val items = songs.map { it.toMediaItem(qualitySetting) }
-            val index = startIndex.coerceIn(0, items.lastIndex)
+            // 随机播放时起点也要随机：以前固定用 startIndex(=0)，表现出来就是
+            // 「点了随机播放却总是从歌单第一首开始」。洗牌顺序由服务端按 seed 生成，
+            // 随机起点 + 洗牌前进 = 一轮不重复；非随机仍从用户点的那首开始。
+            val index = if (shuffle) {
+                items.indices.random()
+            } else {
+                startIndex.coerceIn(0, items.lastIndex)
+            }
             mediaController.setMediaItems(items, index, 0L)
             // 洗牌顺序由服务端在创建播放器时用固定 seed 设好（MediaController 不支持 setShuffleOrder），
             // 这里只切开关，保证同一次会话内顺序稳定、不会每切一次歌就重排。
