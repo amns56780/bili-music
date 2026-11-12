@@ -67,6 +67,18 @@ data class UgcArcDto(
     val duration: Int = 0,
 )
 
+/**
+ * 单曲条目应该显示的时长（秒）。
+ *
+ * 多P视频的 `view.duration` 是**所有分P之和**（实测 BV1n1421t7XY：duration=10213s，
+ * 而第 1 个分P只有 147s）；而单曲条目实际播放的是 `view.cid` 对应的那一个分P
+ * （通常是第 1 个）。直接用 duration 会让第一首显示成整段视频/整个合集的时长。
+ */
+fun ViewData.primarySongDurationSeconds(): Int {
+    val page = pages?.firstOrNull { it.cid == cid } ?: pages?.firstOrNull()
+    return page?.duration ?: duration
+}
+
 /** 合集内容（/x/polymer/web-space/seasons_archives_list），用于补充 / 兜底 */
 @Serializable
 data class SeasonArchivesData(

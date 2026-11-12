@@ -15,6 +15,7 @@ import com.bilimusic.app.data.remote.dto.UgcEpisodeDto
 import com.bilimusic.app.data.remote.dto.UgcSeasonDto
 import com.bilimusic.app.data.remote.dto.ViewData
 import com.bilimusic.app.data.remote.dto.ViewPageDto
+import com.bilimusic.app.data.remote.dto.primarySongDurationSeconds
 import com.bilimusic.app.domain.model.AddSongResult
 import com.bilimusic.app.domain.model.DuplicateNameChoice
 import com.bilimusic.app.domain.model.FavFolder
@@ -698,7 +699,7 @@ class ImportRepositoryImpl @Inject constructor(
             title = title,
             upperName = owner?.name.orEmpty().ifBlank { "未知UP主" },
             coverUrl = pic.toHttpsOrNull(),
-            durationMs = duration * 1000L,
+            durationMs = primarySongDurationSeconds() * 1000L,
             collectionKey = collectionKey,
             episodeCount = episodeCount,
             pageIndex = pageIndex,
