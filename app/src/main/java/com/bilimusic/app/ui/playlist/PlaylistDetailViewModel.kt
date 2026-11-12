@@ -155,6 +155,26 @@ class PlaylistDetailViewModel @Inject constructor(
         _selectedSongIds.value = emptySet()
     }
 
+    /** 框选：一次性把拖框经过的曲目设为选中集合 */
+    fun setSelection(ids: Collection<Long>) {
+        // 框选可能一个都没框到：也允许清空（保持多选模式）
+        _selectionMode.value = true
+        _selectedSongIds.value = ids.toSet()
+    }
+
+    /** 拖动排序：把歌单内第 fromIndex 首移动到 toIndex */
+    fun moveSong(fromIndex: Int, toIndex: Int) {
+        val songs = uiState.value.songs
+        if (fromIndex !in songs.indices || toIndex !in songs.indices) return
+        if (fromIndex == toIndex) return
+        val reordered = songs.toMutableList()
+        val moved = reordered.removeAt(fromIndex)
+        reordered.add(toIndex, moved)
+        viewModelScope.launch {
+            repository.reorderSongs(playlistId, reordered.map { it.id })
+        }
+    }
+
     /** 打开「选择目标歌单」对话框（排除当前歌单 —— 复制/移动到自己没意义） */
     fun openBatchTarget(action: SongBatchAction) {
         if (_selectedSongIds.value.isEmpty()) {

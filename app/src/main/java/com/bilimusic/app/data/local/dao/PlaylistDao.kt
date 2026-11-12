@@ -62,6 +62,10 @@ interface PlaylistDao {
     @Query("UPDATE playlist SET title = :title WHERE id = :id")
     suspend fun rename(id: Long, title: String)
 
+    /** 拖动排序：直接改 sortOrder */
+    @Query("UPDATE playlist SET sortOrder = :sortOrder WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, sortOrder: Int)
+
     @Query("UPDATE playlist SET coverUrl = :coverUrl WHERE id = :id")
     suspend fun updateCover(id: Long, coverUrl: String?)
 

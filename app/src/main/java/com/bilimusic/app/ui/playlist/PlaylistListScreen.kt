@@ -2,6 +2,20 @@ package com.bilimusic.app.ui.playlist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -118,16 +132,87 @@ fun PlaylistListScreen(
                             onSecondaryAction = { showCreateDialog = true },
                         )
                     } else {
+                        val gridState = rememberLazyGridState()
+                        val itemBounds = remember { mutableStateMapOf<Long, Rect>() }
+                        var draggingId by remember { mutableStateOf<Long?>(null) }
+                        var dragDelta by remember { mutableStateOf(Offset.Zero) }
+                        val latestPlaylists by rememberUpdatedState(state.playlists)
+                        val haptic = LocalHapticFeedback.current
+                        val gridBounds = remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+                        var dragPointer by remember { mutableStateOf(Offset.Zero) }
+                        // 拖到网格上下边缘时自动滚动
+                        LaunchedEffect(draggingId) {
+                            while (draggingId != null) {
+                                val top = gridBounds.value.top
+                                val bottom = gridBounds.value.bottom
+                                val margin = 140f
+                                when {
+                                    dragPointer.y in 0f..(top + margin) -> gridState.scrollBy(-14f)
+                                    dragPointer.y >= bottom - margin -> gridState.scrollBy(14f)
+                                }
+                                withFrameNanos { }
+                            }
+                        }
                         LazyVerticalGrid(
+                            state = gridState,
                             columns = GridCells.Adaptive(minSize = 160.dp),
                             contentPadding = PaddingValues(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .onGloballyPositioned { gridBounds.value = it.boundsInRoot() },
                         ) {
                             items(state.playlists, key = { it.id }) { playlist ->
                                 PlaylistCard(
                                     playlist = playlist,
+                                    modifier = Modifier
+                                        .graphicsLayer {
+                                            if (draggingId == playlist.id) {
+                                                translationX = dragDelta.x
+                                                translationY = dragDelta.y
+                                                scaleX = 1.04f
+                                                scaleY = 1.04f
+                                            }
+                                        }
+                                        .onGloballyPositioned {
+                                            itemBounds[playlist.id] = it.boundsInRoot()
+                                        }
+                                        .pointerInput(playlist.id) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = {
+                                                    draggingId = playlist.id
+                                                    dragDelta = Offset.Zero
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onDrag = { change, amount ->
+                                                    change.consume()
+                                                    dragDelta += amount
+                                                    val sourceRect = itemBounds[playlist.id] ?: return@detectDragGesturesAfterLongPress
+                                                    val pointer = sourceRect.topLeft + change.position
+                                                    dragPointer = pointer
+                                                    val targetId = itemBounds.entries
+                                                        .firstOrNull { it.key != playlist.id && it.value.contains(pointer) }
+                                                        ?.key ?: return@detectDragGesturesAfterLongPress
+                                                    val list = latestPlaylists
+                                                    val fromIndex = list.indexOfFirst { it.id == playlist.id }
+                                                    val toIndex = list.indexOfFirst { it.id == targetId }
+                                                    if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
+                                                        viewModel.movePlaylist(fromIndex, toIndex)
+                                                        dragDelta = Offset.Zero
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    draggingId = null
+                                                    dragDelta = Offset.Zero
+                                                },
+                                                onDragCancel = {
+                                                    draggingId = null
+                                                    dragDelta = Offset.Zero
+                                                },
+                                            )
+                                        },
                                     onOpen = { onOpenPlaylist(playlist.id) },
                                     onRename = { renameTarget = playlist },
                                     onDelete = { deleteTarget = playlist },
@@ -197,11 +282,12 @@ private fun PlaylistCard(
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen),
     ) {

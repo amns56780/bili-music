@@ -1,7 +1,10 @@
 package com.bilimusic.app.ui.playlist
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -23,10 +26,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -63,12 +68,26 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -289,6 +308,53 @@ fun PlaylistDetailScreen(
     var confirmDownloadAll by remember { mutableStateOf(false) }
     var showCoverPicker by remember { mutableStateOf(false) }
 
+    // ---- 曲目拖动排序 / 框选 ----
+    val listState = rememberLazyListState()
+    val itemBounds = remember { mutableStateMapOf<Long, Rect>() }
+    val listBounds = remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+    var draggingSongId by remember { mutableStateOf<Long?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var dragPointerY by remember { mutableFloatStateOf(0f) }
+    var boxSelecting by remember { mutableStateOf(false) }
+    var bandActive by remember { mutableStateOf(false) }
+    var bandStart by remember { mutableStateOf(Offset.Zero) }
+    var bandCurrent by remember { mutableStateOf(Offset.Zero) }
+    val overlayBounds = remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+    val latestSongs by rememberUpdatedState(uiState.songs)
+
+    // 退出多选时同时退出框选
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) boxSelecting = false
+    }
+
+    // 拖动到列表上下边缘时自动滚动
+    LaunchedEffect(draggingSongId) {
+        while (draggingSongId != null) {
+            val top = listBounds.value.top
+            val bottom = listBounds.value.bottom
+            val margin = 130f
+            when {
+                dragPointerY in 0f..(top + margin) -> listState.scrollBy(-16f)
+                dragPointerY >= bottom - margin -> listState.scrollBy(16f)
+            }
+            withFrameNanos { }
+        }
+    }
+
+    // 框选拖到边缘时自动滚动
+    LaunchedEffect(bandActive) {
+        while (bandActive) {
+            val y = overlayBounds.value.top + bandCurrent.y
+            val top = listBounds.value.top
+            val bottom = listBounds.value.bottom
+            when {
+                y <= top + 110f -> listState.scrollBy(-14f)
+                y >= bottom - 110f -> listState.scrollBy(14f)
+            }
+            withFrameNanos { }
+        }
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
@@ -312,6 +378,9 @@ fun PlaylistDetailScreen(
                     actions = {
                         TextButton(onClick = viewModel::selectAllSongs) { Text("全选") }
                         TextButton(onClick = viewModel::invertSelection) { Text("反选") }
+                        TextButton(onClick = { boxSelecting = !boxSelecting }) {
+                            Text(if (boxSelecting) "完成框选" else "框选")
+                        }
                     },
                 )
             } else {
@@ -420,10 +489,12 @@ fun PlaylistDetailScreen(
                 )
 
                 else -> LazyColumn(
+                    state = listState,
                     // 平板/横屏下别把每一行拉成一整屏宽，居中限宽更好读
                     modifier = Modifier
                         .fillMaxSize()
-                        .widthIn(max = 760.dp),
+                        .widthIn(max = 760.dp)
+                        .onGloballyPositioned { listBounds.value = it.boundsInRoot() },
                     // 多选时底部有操作栏，留出空间免得最后几首被挡住
                     contentPadding = PaddingValues(bottom = if (selectionMode) 148.dp else 24.dp),
                 ) {
@@ -454,7 +525,58 @@ fun PlaylistDetailScreen(
                             items = uiState.songs,
                             key = { _, song -> song.id },
                         ) { index, song ->
+                            val isDragging = draggingSongId == song.id
                             SongRow(
+                                modifier = Modifier
+                                    .onGloballyPositioned { itemBounds[song.id] = it.boundsInRoot() }
+                                    .zIndex(if (isDragging) 1f else 0f)
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            translationY = dragOffsetY
+                                            scaleX = 1.02f
+                                            scaleY = 1.02f
+                                        }
+                                    }
+                                    .background(
+                                        if (isDragging) MaterialTheme.colorScheme.surfaceVariant
+                                        else Color.Transparent,
+                                    ),
+                                dragHandleModifier = Modifier.pointerInput(song.id) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            draggingSongId = song.id
+                                            dragOffsetY = 0f
+                                            dragPointerY = itemBounds[song.id]?.center?.y ?: 0f
+                                        },
+                                        onDrag = { change, amount ->
+                                            change.consume()
+                                            dragOffsetY += amount.y
+                                            val centerY =
+                                                (itemBounds[song.id]?.center?.y ?: 0f) + dragOffsetY
+                                            dragPointerY = centerY
+                                            val targetId = itemBounds.entries.firstOrNull { (id, rect) ->
+                                                id != song.id && centerY >= rect.top && centerY <= rect.bottom
+                                            }?.key
+                                            if (targetId != null) {
+                                                val songs = latestSongs
+                                                val from = songs.indexOfFirst { it.id == song.id }
+                                                val to = songs.indexOfFirst { it.id == targetId }
+                                                if (from >= 0 && to >= 0 && from != to) {
+                                                    viewModel.moveSong(from, to)
+                                                    dragOffsetY = 0f
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            draggingSongId = null
+                                            dragOffsetY = 0f
+                                        },
+                                        onDragCancel = {
+                                            draggingSongId = null
+                                            dragOffsetY = 0f
+                                        },
+                                    )
+                                },
                                 index = index + 1,
                                 song = song,
                                 downloadInfo = viewModel.downloadStatusOf(song, downloadStates),
@@ -481,6 +603,62 @@ fun PlaylistDetailScreen(
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            // 框选：选择模式下点「框选」后，在列表上拖出矩形，选中与矩形相交的曲目
+            if (selectionMode && boxSelecting) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { overlayBounds.value = it.boundsInRoot() }
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { start ->
+                                    bandStart = start
+                                    bandCurrent = start
+                                    bandActive = true
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    bandCurrent = change.position
+                                    val origin = overlayBounds.value.topLeft
+                                    val left = minOf(bandStart.x, bandCurrent.x) + origin.x
+                                    val top = minOf(bandStart.y, bandCurrent.y) + origin.y
+                                    val right = maxOf(bandStart.x, bandCurrent.x) + origin.x
+                                    val bottom = maxOf(bandStart.y, bandCurrent.y) + origin.y
+                                    val ids = latestSongs.filter { song ->
+                                        val rect = itemBounds[song.id] ?: return@filter false
+                                        rect.right >= left && rect.left <= right &&
+                                            rect.bottom >= top && rect.top <= bottom
+                                    }.map { it.id }
+                                    viewModel.setSelection(ids)
+                                },
+                                onDragEnd = { bandActive = false },
+                                onDragCancel = { bandActive = false },
+                            )
+                        },
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        if (bandActive) {
+                            val left = minOf(bandStart.x, bandCurrent.x)
+                            val top = minOf(bandStart.y, bandCurrent.y)
+                            val right = maxOf(bandStart.x, bandCurrent.x)
+                            val bottom = maxOf(bandStart.y, bandCurrent.y)
+                            val rectSize = Size(right - left, bottom - top)
+                            drawRect(
+                                color = Color(0x33EC4141),
+                                topLeft = Offset(left, top),
+                                size = rectSize,
+                            )
+                            drawRect(
+                                color = Color(0xCCEC4141),
+                                topLeft = Offset(left, top),
+                                size = rectSize,
+                                style = Stroke(width = 2f),
+                            )
                         }
                     }
                 }
@@ -793,6 +971,8 @@ private fun PlaylistHeader(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SongRow(
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier = Modifier,
     index: Int,
     song: Song,
     downloadInfo: DownloadInfo,
@@ -808,7 +988,7 @@ private fun SongRow(
     var menuExpanded by remember { mutableStateOf(false) }
 
     ListItem(
-        modifier = Modifier.combinedClickable(
+        modifier = modifier.combinedClickable(
             onClick = onClick,
             onLongClick = onLongClick,
         ),
@@ -881,6 +1061,19 @@ private fun SongRow(
                     info = downloadInfo,
                     onDownload = onDownload,
                 )
+                if (!selectionMode) {
+                    Box(
+                        modifier = dragHandleModifier.size(32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.DragHandle,
+                            contentDescription = "拖动排序",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
                 Text(
                     text = song.durationText,
                     style = MaterialTheme.typography.labelMedium,

@@ -118,4 +118,18 @@ class PlaylistListViewModel @Inject constructor(
             _messages.send("已删除歌单「${playlist.title}」")
         }
     }
+
+    /** 拖动排序：把第 fromIndex 个歌单移动到 toIndex */
+    fun movePlaylist(fromIndex: Int, toIndex: Int) {
+        val ready = uiState.value as? PlaylistListUiState.Ready ?: return
+        val playlists = ready.playlists
+        if (fromIndex !in playlists.indices || toIndex !in playlists.indices) return
+        if (fromIndex == toIndex) return
+        val reordered = playlists.toMutableList()
+        val moved = reordered.removeAt(fromIndex)
+        reordered.add(toIndex, moved)
+        viewModelScope.launch {
+            repository.reorderPlaylists(reordered.map { it.id })
+        }
+    }
 }

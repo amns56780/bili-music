@@ -56,6 +56,12 @@ interface PlaylistRepository {
         songIds: Set<Long>,
     ): AddSongsResult
 
+    /** 拖动排序：按给定顺序重写所有歌单的 sortOrder */
+    suspend fun reorderPlaylists(orderedIds: List<Long>)
+
+    /** 拖动排序：按给定顺序重写歌单内曲目的 sortOrder */
+    suspend fun reorderSongs(playlistId: Long, orderedIds: List<Long>)
+
     /** 新增曲目；返回 (新增数, 因去重跳过数) */
     suspend fun addSongs(playlistId: Long, drafts: List<SongDraft>): AddSongsResult
 
@@ -221,6 +227,14 @@ class PlaylistRepositoryImpl @Inject constructor(
             .filter { it.id in songIds }
             .forEach { songDao.deleteById(it.id) }
         return result
+    }
+
+    override suspend fun reorderPlaylists(orderedIds: List<Long>) {
+        orderedIds.forEachIndexed { index, id -> playlistDao.updateSortOrder(id, index) }
+    }
+
+    override suspend fun reorderSongs(playlistId: Long, orderedIds: List<Long>) {
+        orderedIds.forEachIndexed { index, id -> songDao.updateSortOrder(id, index) }
     }
 
     override suspend fun addSongs(playlistId: Long, drafts: List<SongDraft>): AddSongsResult {
