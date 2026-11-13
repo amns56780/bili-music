@@ -1001,31 +1001,41 @@ private fun SongRow(
             )
         },
         supportingContent = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = song.upperName.ifBlank { "未知UP主" },
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (song.isLocal) {
-                    LocalBadge()
+            // UP 主一行；合集信息单独一行并强制单行省略。
+            // 之前两者挤在同一行，合集文字被压到几乎没宽度，中文就会一个字符一行地竖排。
+            Column {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = song.upperName.ifBlank { "未知UP主" },
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (song.isLocal) {
+                        LocalBadge()
+                    }
+                    if (song.isInvalid) {
+                        Text(
+                            text = "已失效",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                        )
+                    }
                 }
                 if (song.episodeCount > 1) {
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         text = "合集 · 第 ${song.pageIndex} 集 / 共 ${song.episodeCount} 集",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                if (song.isInvalid) {
-                    Text(
-                        text = "已失效",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
