@@ -323,6 +323,7 @@ fun PlaylistDetailScreen(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var dragPointerY by remember { mutableFloatStateOf(0f) }
     var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragTargetIndex by remember { mutableIntStateOf(-1) }
     var boxSelecting by remember { mutableStateOf(false) }
     var bandActive by remember { mutableStateOf(false) }
     var bandStart by remember { mutableStateOf(Offset.Zero) }
@@ -341,9 +342,16 @@ fun PlaylistDetailScreen(
             val top = listBounds.value.top
             val bottom = listBounds.value.bottom
             val margin = 130f
+            // 列表滚动时同步补偿 dragOffsetY，让被拖的行保持在手指下方
             when {
-                dragPointerY in 0f..(top + margin) -> listState.scrollBy(-16f)
-                dragPointerY >= bottom - margin -> listState.scrollBy(16f)
+                dragPointerY in 0f..(top + margin) -> {
+                    listState.scrollBy(-16f)
+                    dragOffsetY += 16f
+                }
+                dragPointerY >= bottom - margin -> {
+                    listState.scrollBy(16f)
+                    dragOffsetY -= 16f
+                }
             }
             withFrameNanos { }
         }
@@ -546,15 +554,20 @@ fun PlaylistDetailScreen(
                                         }
                                     }
                                     .background(
-                                        if (isDragging) MaterialTheme.colorScheme.surfaceVariant
-                                        else Color.Transparent,
+                                        when {
+                                            isDragging -> MaterialTheme.colorScheme.surfaceVariant
+                                            draggingSongId != null && dragTargetIndex == index ->
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                            else -> Color.Transparent
+                                        },
                                     ),
                                 dragHandleModifier = Modifier.pointerInput(song.id) {
-                                    // 长按手柄才进入拖动：普通上下滑动交给列表滚动，避免误触。
-                                    // 松手后用 Snackbar 提示移动结果并支持撤销。
+                                    // 长按手柄才进入拖动；拖动期间只跟手、不改数据，松手才落位。
+                                    // （旧实现每越过一行就 moveSong 并把偏移清零，行会瞬间跳位。）
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = {
                                             dragStartIndex = latestSongs.indexOfFirst { it.id == song.id }
+                                            dragTargetIndex = dragStartIndex
                                             draggingSongId = song.id
                                             dragOffsetY = 0f
                                             dragPointerY = itemBounds[song.id]?.center?.y ?: 0f
@@ -566,37 +579,31 @@ fun PlaylistDetailScreen(
                                             val centerY =
                                                 (itemBounds[song.id]?.center?.y ?: 0f) + dragOffsetY
                                             dragPointerY = centerY
-                                            val targetId = itemBounds.entries.firstOrNull { (id, rect) ->
-                                                id != song.id && centerY >= rect.top && centerY <= rect.bottom
-                                            }?.key
-                                            if (targetId != null) {
-                                                val songs = latestSongs
-                                                val from = songs.indexOfFirst { it.id == song.id }
-                                                val to = songs.indexOfFirst { it.id == targetId }
-                                                if (from >= 0 && to >= 0 && from != to) {
-                                                    viewModel.moveSong(from, to)
-                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    dragOffsetY = 0f
-                                                }
+                                            val target = dropTargetIndex(song.id, centerY, latestSongs, itemBounds)
+                                            if (target != dragTargetIndex) {
+                                                dragTargetIndex = target
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             }
                                         },
                                         onDragEnd = {
                                             val startIndex = dragStartIndex
+                                            val targetIndex = dragTargetIndex
                                             draggingSongId = null
                                             dragOffsetY = 0f
                                             dragStartIndex = -1
-                                            val endIndex = latestSongs.indexOfFirst { it.id == song.id }
-                                            if (startIndex >= 0 && endIndex >= 0 && endIndex != startIndex) {
+                                            dragTargetIndex = -1
+                                            if (startIndex >= 0 && targetIndex >= 0 && targetIndex != startIndex) {
+                                                viewModel.moveSong(startIndex, targetIndex)
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 scope.launch {
                                                     val result = snackbarHostState.showSnackbar(
-                                                        message = "已移动「${song.title}」到第 ${endIndex + 1} 位",
+                                                        message = "已移动「${song.title}」到第 ${targetIndex + 1} 位",
                                                         actionLabel = "撤销",
                                                         withDismissAction = true,
                                                         duration = SnackbarDuration.Short,
                                                     )
                                                     if (result == SnackbarResult.ActionPerformed) {
-                                                        viewModel.moveSong(endIndex, startIndex)
+                                                        viewModel.moveSong(targetIndex, startIndex)
                                                     }
                                                 }
                                             }
@@ -605,6 +612,7 @@ fun PlaylistDetailScreen(
                                             draggingSongId = null
                                             dragOffsetY = 0f
                                             dragStartIndex = -1
+                                            dragTargetIndex = -1
                                         },
                                     )
                                 },
@@ -1000,6 +1008,35 @@ private fun PlaylistHeader(
             }
         }
     }
+}
+
+/**
+ * 拖动落点：被拖行的视觉中心落在哪一行的矩形内，就移动到那一行。
+ * 拖出列表上下边界时落到第一首 / 最后一首。
+ */
+private fun dropTargetIndex(
+    songId: Long,
+    centerY: Float,
+    songs: List<Song>,
+    bounds: Map<Long, Rect>,
+): Int {
+    if (songs.isEmpty()) return -1
+    val start = songs.indexOfFirst { it.id == songId }
+    if (start < 0) return -1
+    var target = start
+    for ((index, s) in songs.withIndex()) {
+        if (s.id == songId) continue
+        val rect = bounds[s.id] ?: continue
+        if (centerY in rect.top..rect.bottom) {
+            target = index
+            break
+        }
+    }
+    val firstRect = bounds[songs.first().id]
+    val lastRect = bounds[songs.last().id]
+    if (firstRect != null && centerY < firstRect.top) target = 0
+    if (lastRect != null && centerY > lastRect.bottom) target = songs.lastIndex
+    return target
 }
 
 @OptIn(ExperimentalFoundationApi::class)
