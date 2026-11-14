@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.basicMarquee
@@ -61,6 +62,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,6 +72,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +87,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -298,6 +304,7 @@ fun PlaylistDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -315,6 +322,7 @@ fun PlaylistDetailScreen(
     var draggingSongId by remember { mutableStateOf<Long?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var dragPointerY by remember { mutableFloatStateOf(0f) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
     var boxSelecting by remember { mutableStateOf(false) }
     var bandActive by remember { mutableStateOf(false) }
     var bandStart by remember { mutableStateOf(Offset.Zero) }
@@ -542,11 +550,15 @@ fun PlaylistDetailScreen(
                                         else Color.Transparent,
                                     ),
                                 dragHandleModifier = Modifier.pointerInput(song.id) {
-                                    detectDragGestures(
+                                    // 长按手柄才进入拖动：普通上下滑动交给列表滚动，避免误触。
+                                    // 松手后用 Snackbar 提示移动结果并支持撤销。
+                                    detectDragGesturesAfterLongPress(
                                         onDragStart = {
+                                            dragStartIndex = latestSongs.indexOfFirst { it.id == song.id }
                                             draggingSongId = song.id
                                             dragOffsetY = 0f
                                             dragPointerY = itemBounds[song.id]?.center?.y ?: 0f
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
                                         onDrag = { change, amount ->
                                             change.consume()
@@ -563,17 +575,36 @@ fun PlaylistDetailScreen(
                                                 val to = songs.indexOfFirst { it.id == targetId }
                                                 if (from >= 0 && to >= 0 && from != to) {
                                                     viewModel.moveSong(from, to)
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     dragOffsetY = 0f
                                                 }
                                             }
                                         },
                                         onDragEnd = {
+                                            val startIndex = dragStartIndex
                                             draggingSongId = null
                                             dragOffsetY = 0f
+                                            dragStartIndex = -1
+                                            val endIndex = latestSongs.indexOfFirst { it.id == song.id }
+                                            if (startIndex >= 0 && endIndex >= 0 && endIndex != startIndex) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                scope.launch {
+                                                    val result = snackbarHostState.showSnackbar(
+                                                        message = "已移动「${song.title}」到第 ${endIndex + 1} 位",
+                                                        actionLabel = "撤销",
+                                                        withDismissAction = true,
+                                                        duration = SnackbarDuration.Short,
+                                                    )
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        viewModel.moveSong(endIndex, startIndex)
+                                                    }
+                                                }
+                                            }
                                         },
                                         onDragCancel = {
                                             draggingSongId = null
                                             dragOffsetY = 0f
+                                            dragStartIndex = -1
                                         },
                                     )
                                 },
@@ -589,7 +620,10 @@ fun PlaylistDetailScreen(
                                         onOpenPlayer()
                                     }
                                 },
-                                onLongClick = { viewModel.enterSelection(song.id) },
+                                onLongClick = {
+                                    // 长按手柄进入拖动时，不要再触发进入多选
+                                    if (draggingSongId == null) viewModel.enterSelection(song.id)
+                                },
                                 onOpenCollection = {
                                     song.collectionKey?.let(onOpenCollection)
                                 },
